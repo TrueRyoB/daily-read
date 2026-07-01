@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ paper.title }} — daily-read{% endblock %}
+{% block content %}
+<article class="reader">
+  <header class="reader-header" id="top">
+    <h1>{{ paper.title }}</h1>
+    <p class="reading-meta">
+      推定読了時間: 約{{ content.est_minutes }}分（30分目標の{{ (content.est_minutes / 30 * 100) | round | int }}%）・{{ content.word_count }}語
+    </p>
+    <p class="reader-source">出典: {{ paper.source }}</p>
+    {% if content.glossary %}
+    <p class="glossary-hint">下線付きの語句をクリックすると、意味・用例が表示されます。</p>
+    {% endif %}
+  </header>
+
+  <div class="reader-layout">
+    <div class="reader-body">
+      {% for unit in rendered_units %}
+        {% if unit.kind == "heading" %}
+          {% if unit.level == 1 %}<h2>{{ unit.html | safe }}</h2>
+          {% elif unit.level == 2 %}<h3>{{ unit.html | safe }}</h3>
+          {% else %}<h4>{{ unit.html | safe }}</h4>{% endif %}
+        {% elif unit.kind == "paragraph" %}
+          <p>{{ unit.html | safe }}</p>
+        {% elif unit.kind == "figure_ref" %}
+          {% set fig = figures_by_id.get(unit.figure_id) %}
+          {% if fig %}
+          <a class="figure-jump" href="#{{ fig.figure_id }}">図を見る: {{ fig.label }} ↓</a>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {% if content.figures %}
+    <aside class="figures-panel">
+      <h2>図表一覧</h2>
+      {% for fig in content.figures %}
+      <figure id="{{ fig.figure_id }}" class="figure-card">
+        <a href="#top" class="figure-back">本文に戻る ↑</a>
+        <img src="/papers/{{ paper_id }}/figures/{{ fig.image_path.split('/')[-1] }}" alt="{{ fig.label }}" loading="lazy" />
+        <figcaption>{{ fig.caption or fig.label }}</figcaption>
+      </figure>
+      {% endfor %}
+    </aside>
+    {% endif %}
+  </div>
+</article>
+
+<script type="application/json" id="glossary-data">{{ glossary_json | safe }}</script>
+<div id="glossary-popover" class="glossary-popover" hidden></div>
+<script src="/static/reader.js"></script>
+{% endblock %}

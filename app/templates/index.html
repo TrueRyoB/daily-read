@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}daily-read{% endblock %}
+{% block content %}
+<section class="upload-panel">
+  <h1>今日読む論文を追加</h1>
+  <form action="/papers" method="post" enctype="multipart/form-data" class="upload-form">
+    <label class="field">
+      <span>PDFファイル</span>
+      <input type="file" name="file" accept="application/pdf" />
+    </label>
+    <div class="or-divider">または</div>
+    <label class="field">
+      <span>PDFのURL（例: arXivのabsページ）</span>
+      <input type="url" name="url" placeholder="https://arxiv.org/abs/xxxx.xxxxx" />
+    </label>
+    <button type="submit">読みやすく整形する</button>
+  </form>
+</section>
+
+<section class="history">
+  <h2>これまでの論文</h2>
+  {% if papers %}
+  <ul class="paper-list">
+    {% for paper in papers %}
+    <li class="paper-list-item">
+      <a href="/papers/{{ paper.id }}">{{ paper.title }}</a>
+      <span class="paper-meta">約{{ paper.est_minutes }}分 ・ {{ paper.created_at[:10] }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty-state">まだ論文がありません。上のフォームからPDFかURLを追加してください。</p>
+  {% endif %}
+</section>
+{% endblock %}

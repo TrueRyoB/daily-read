@@ -1,0 +1,26 @@
+[project]
+name = "daily-read"
+version = "0.1.0"
+description = "Turn PDF papers into a single-column, glossary-annotated reading view for a 30-minute morning habit."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "pymupdf>=1.24",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
