@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ t('calendar_heading', year=calendar.year, month=calendar.month, month_name=month_name) }} — daily-read{% endblock %}
+{% block content %}
+<section class="calendar-view">
+  <div class="calendar-nav">
+    <a href="/calendar?month={{ prev_month }}">{{ t('calendar_prev') }}</a>
+    <h1>{{ t('calendar_heading', year=calendar.year, month=calendar.month, month_name=month_name) }}</h1>
+    <a href="/calendar?month={{ next_month }}">{{ t('calendar_next') }}</a>
+  </div>
+
+  <table class="calendar-grid">
+    <thead>
+      <tr>
+        {% for weekday in t('calendar_weekdays').split(',') %}
+        <th>{{ weekday }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in calendar.weeks %}
+      <tr>
+        {% for cell in week %}
+        {% if cell is none %}
+        <td class="calendar-cell calendar-cell-empty"></td>
+        {% else %}
+        <td class="calendar-cell{% if cell.papers %} calendar-cell-has-papers{% endif %}">
+          <span class="calendar-day-number">{{ cell.day }}</span>
+          {% for paper in cell.papers %}
+          <a class="calendar-paper-link" href="/papers/{{ paper.id }}" title="{{ paper.title }}">{{ paper.title }}</a>
+          {% endfor %}
+        </td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

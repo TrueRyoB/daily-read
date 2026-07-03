@@ -12,6 +12,7 @@ threading.Thread is used instead of FastAPI's BackgroundTasks.
 
 from __future__ import annotations
 
+import calendar as _calendar_module
 import json
 import logging
 from datetime import datetime, timezone
@@ -64,6 +65,41 @@ def index(request: Request) -> HTMLResponse:
     return _render(request, "index.html", {"papers": papers})
 
 
+@app.get("/calendar", response_class=HTMLResponse)
+def calendar_view(request: Request, month: str | None = None) -> HTMLResponse:
+    """Papers grouped by the date they were added, calendar-grid style
+    (plan/07-troubleshooting-backlog.md#b-4). `?month=YYYY-MM` navigates;
+    defaults to the current month."""
+    now = datetime.now(timezone.utc)
+    year, month_num = now.year, now.month
+    if month:
+        try:
+            year, month_num = (int(part) for part in month.split("-", 1))
+        except ValueError:
+            pass  # malformed ?month= -- fall back to the current month
+
+    conn = db.get_connection()
+    try:
+        papers = db.list_papers(conn)
+    finally:
+        conn.close()
+
+    calendar_data = rendering.build_calendar_month(papers, year, month_num)
+    prev_year, prev_month = (year - 1, 12) if month_num == 1 else (year, month_num - 1)
+    next_year, next_month = (year + 1, 1) if month_num == 12 else (year, month_num + 1)
+
+    return _render(
+        request,
+        "calendar.html",
+        {
+            "calendar": calendar_data,
+            "month_name": _calendar_module.month_name[month_num],
+            "prev_month": f"{prev_year:04d}-{prev_month:02d}",
+            "next_month": f"{next_year:04d}-{next_month:02d}",
+        },
+    )
+
+
 @app.post("/papers")
 async def submit_paper(
     file: UploadFile | None = File(None),
@@ -76,7 +112,15 @@ async def submit_paper(
     # here (plan/05-f).
     if file is not None and file.filename:
         pdf_bytes = await file.read()
-        paper_id = pipeline.start_upload_processing(file.filename, pdf_bytes)
+        # plan/07-troubleshooting-backlog.md#b-3: a byte-for-byte duplicate
+        # of an already-processed (or in-progress) upload is redirected to
+        # the existing paper instead of paying for another GROBID call.
+        # Upload-only for now: an equivalent check for URL submissions
+        # would need resolving the URL synchronously here (defeating the
+        # point of the background-thread design) or a more involved
+        # "duplicate found mid-processing" state, neither implemented yet.
+        existing_paper_id = pipeline.find_existing_paper_id(pdf_bytes)
+        paper_id = existing_paper_id or pipeline.start_upload_processing(file.filename, pdf_bytes)
     elif url:
         paper_id = pipeline.start_url_processing(url)
     else:
@@ -138,6 +182,7 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
             "rendered_units": rendered_units,
             "glossary_json": rendering.glossary_json(content["glossary"]),
             "figures_json": rendering.figures_json(content["figures"], paper_id),
+            "bibliography_json": rendering.bibliography_json(content["bibliography"]),
             "preread_terms": preread_terms,
             "toc_entries": toc_entries,
             "search_url": rendering.search_url,

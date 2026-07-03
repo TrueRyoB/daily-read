@@ -65,3 +65,39 @@ def test_timeout_is_turned_into_a_clear_runtime_error(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="秒以内"):
         grobid_client.extract_tei(str(pdf_path))
+
+
+def test_timeout_is_configurable_via_env_var(tmp_path, monkeypatch):
+    # plan/07-troubleshooting-backlog.md#a-4: tunable without a code change
+    # in case disabling consolidation doesn't fully eliminate slow runs.
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    captured = {}
+
+    def fake_post(url, *, files, data, timeout):
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setenv(grobid_client._TIMEOUT_ENV_VAR, "300")
+
+    grobid_client.extract_tei(str(pdf_path))
+
+    assert captured["timeout"] == 300.0
+
+
+def test_timeout_falls_back_to_default_when_env_var_is_not_a_number(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    captured = {}
+
+    def fake_post(url, *, files, data, timeout):
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setenv(grobid_client._TIMEOUT_ENV_VAR, "not-a-number")
+
+    grobid_client.extract_tei(str(pdf_path))
+
+    assert captured["timeout"] == grobid_client._DEFAULT_REQUEST_TIMEOUT

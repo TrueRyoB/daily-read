@@ -65,6 +65,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE papers ADD COLUMN error_message TEXT")
     except sqlite3.OperationalError:
         pass  # already migrated
+    try:
+        # plan/07-troubleshooting-backlog.md#b-3: sha256 of the raw PDF
+        # bytes, so a re-uploaded duplicate can be detected before paying
+        # for another GROBID call.
+        conn.execute("ALTER TABLE papers ADD COLUMN pdf_hash TEXT")
+    except sqlite3.OperationalError:
+        pass  # already migrated
 
 
 def insert_paper(
@@ -77,13 +84,34 @@ def insert_paper(
     word_count: int,
     est_minutes: int,
     status: str = "done",
+    pdf_hash: str | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO papers (id, title, source, created_at, word_count, est_minutes, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (paper_id, title, source, created_at, word_count, est_minutes, status),
+        "INSERT INTO papers (id, title, source, created_at, word_count, est_minutes, status, pdf_hash) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (paper_id, title, source, created_at, word_count, est_minutes, status, pdf_hash),
     )
     conn.commit()
+
+
+def set_pdf_hash(conn: sqlite3.Connection, paper_id: str, pdf_hash: str) -> None:
+    """Backfilled once a URL submission's bytes are actually known (plan/07-
+    troubleshooting-backlog.md#b-3) -- unlike a file upload, a URL's bytes
+    aren't available until resolve_url() runs in the background thread, so
+    they can't be hashed at insert_paper() time the way an upload's can."""
+    conn.execute("UPDATE papers SET pdf_hash = ? WHERE id = ?", (pdf_hash, paper_id))
+    conn.commit()
+
+
+def find_paper_by_hash(conn: sqlite3.Connection, pdf_hash: str) -> dict | None:
+    """The most recent non-error paper with this exact PDF content, if any.
+    Excludes status='error': a failed paper's hash must not block a retry
+    of the very same file from being redirected back to the failure."""
+    row = conn.execute(
+        "SELECT * FROM papers WHERE pdf_hash = ? AND status != 'error' ORDER BY created_at DESC LIMIT 1",
+        (pdf_hash,),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def mark_paper_done(conn: sqlite3.Connection, paper_id: str, *, title: str, word_count: int, est_minutes: int) -> None:

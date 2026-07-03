@@ -27,6 +27,7 @@ concerns).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -47,6 +48,24 @@ from app.pdf.tei_parse import parse_tei
 _WORDS_PER_MINUTE = 200
 
 logger = logging.getLogger(__name__)
+
+
+def hash_pdf_bytes(pdf_bytes: bytes) -> str:
+    return hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def find_existing_paper_id(pdf_bytes: bytes) -> str | None:
+    """Byte-for-byte duplicate check (plan/07-troubleshooting-backlog.md#b-3)
+    -- called only from main.py's real upload route, deliberately NOT from
+    process_upload/_run_pipeline_sync/_start_processing themselves, so
+    tests that intentionally process multiple papers built from identical
+    bytes (e.g. blank_pdf() fixtures) keep working unchanged."""
+    conn = db.get_connection()
+    try:
+        existing = db.find_paper_by_hash(conn, hash_pdf_bytes(pdf_bytes))
+    finally:
+        conn.close()
+    return existing["id"] if existing else None
 
 
 def process_upload(filename: str, pdf_bytes: bytes) -> str:
@@ -76,6 +95,7 @@ def _run_pipeline_sync(pdf_bytes: bytes, source_label: str) -> str:
             created_at=datetime.now(timezone.utc).isoformat(),
             word_count=word_count,
             est_minutes=est_minutes,
+            pdf_hash=hash_pdf_bytes(pdf_bytes),
         )  # status defaults to "done"
     finally:
         conn.close()
@@ -86,14 +106,20 @@ def _run_pipeline_sync(pdf_bytes: bytes, source_label: str) -> str:
 def start_upload_processing(filename: str, pdf_bytes: bytes) -> str:
     """Fast: returns a paper_id almost immediately; the real work happens
     in a background thread. Poll GET /papers/{id}/status."""
-    return _start_processing(source_label=filename, resolve=lambda: resolve_upload(filename, pdf_bytes))
+    return _start_processing(
+        source_label=filename,
+        resolve=lambda: resolve_upload(filename, pdf_bytes),
+        pdf_hash=hash_pdf_bytes(pdf_bytes),  # bytes already in hand, unlike the URL path
+    )
 
 
 def start_url_processing(url: str) -> str:
     return _start_processing(source_label=url, resolve=lambda: resolve_url(url))
 
 
-def _start_processing(source_label: str, resolve: Callable[[], ResolvedSource]) -> str:
+def _start_processing(
+    source_label: str, resolve: Callable[[], ResolvedSource], pdf_hash: str | None = None
+) -> str:
     paper_id = uuid.uuid4().hex[:12]
     storage.paper_dir(paper_id).mkdir(parents=True, exist_ok=True)
 
@@ -108,15 +134,18 @@ def _start_processing(source_label: str, resolve: Callable[[], ResolvedSource]) 
             word_count=0,
             est_minutes=0,
             status="processing",
+            pdf_hash=pdf_hash,
         )
     finally:
         conn.close()
 
-    threading.Thread(target=_process_in_background, args=(paper_id, resolve), daemon=True).start()
+    threading.Thread(target=_process_in_background, args=(paper_id, resolve, pdf_hash), daemon=True).start()
     return paper_id
 
 
-def _process_in_background(paper_id: str, resolve: Callable[[], ResolvedSource]) -> None:
+def _process_in_background(
+    paper_id: str, resolve: Callable[[], ResolvedSource], pdf_hash: str | None = None
+) -> None:
     """Runs off the request thread. Must never let an exception escape
     uncaught: nothing is watching this thread, so an uncaught exception
     here would leave the paper stuck at status="processing" forever with
@@ -124,6 +153,17 @@ def _process_in_background(paper_id: str, resolve: Callable[[], ResolvedSource])
     started = time.perf_counter()
     try:
         resolved = resolve()
+        conn = db.get_connection()
+        try:
+            if pdf_hash is None:
+                # URL path (plan/07-troubleshooting-backlog.md#b-3): bytes
+                # weren't known until resolve() just ran, so the hash
+                # couldn't be stored at insert_paper() time the way an
+                # upload's can -- backfill it now so a future duplicate
+                # (by upload or URL) can still be detected against this paper.
+                db.set_pdf_hash(conn, paper_id, hash_pdf_bytes(resolved.pdf_bytes))
+        finally:
+            conn.close()
         title, word_count, est_minutes = _process_pdf(paper_id, resolved.pdf_bytes)
         conn = db.get_connection()
         try:
@@ -192,8 +232,12 @@ def _process_pdf(paper_id: str, pdf_bytes: bytes) -> tuple[str, int, int]:
         _strip_placeholders(u.text) for u in normalized.units if u.kind in ("heading", "paragraph")
     )
     known_names = list(normalized.authors) + [name for entry in normalized.bibliography for name in entry.authors]
+    # plan/07-troubleshooting-backlog.md#a-3: a frequent term also named in
+    # one of the paper's own headings is assumed to be explained in that
+    # section, even without an explicit in-text definition pattern match.
+    heading_texts = [_strip_placeholders(u.text) for u in normalized.units if u.kind == "heading"]
     t0 = time.perf_counter()
-    glossary = get_extractor().extract(full_text, known_names)
+    glossary = get_extractor().extract(full_text, known_names, heading_texts)
     glossary_seconds = time.perf_counter() - t0
 
     title = normalized.title or _guess_title(normalized)

@@ -20,6 +20,25 @@ def test_in_text_definition_is_detected_and_prioritized():
     assert not any(e.term == "Support Vector Machine" for e in entries)
 
 
+def test_reversed_order_in_text_definition_is_also_detected():
+    # plan/07-troubleshooting-backlog.md#a-3: "ACRONYM (Full Term)" is at
+    # least as common as "Full Term (ACRONYM)" and was previously missed
+    # entirely, wrongly surfacing the term as "undefined".
+    text = (
+        "We rely on SVM (Support Vector Machine) for classification. "
+        "The SVM is trained on labeled data. "
+        "Later we compare the SVM against a baseline."
+    )
+    entries = HeuristicGlossaryExtractor().extract(text)
+    svm_entries = [e for e in entries if e.term == "SVM"]
+    assert len(svm_entries) == 1
+    entry = svm_entries[0]
+    assert entry.definition == "Support Vector Machine"
+    assert entry.source == "in_text_definition"
+
+    assert not any(e.term == "Support Vector Machine" for e in entries)
+
+
 def test_frequent_undefined_term_becomes_concordance_entry():
     text = (
         "The Transformer Model processes the input sequence. "
@@ -161,3 +180,71 @@ def test_definition_immediately_after_heading_without_punctuation_is_missed():
     with_boundary = "1 Introduction. Graph Neural Network (GNN) models are widely used."
     gnn = next(e for e in HeuristicGlossaryExtractor().extract(with_boundary) if e.term == "GNN")
     assert gnn.source == "in_text_definition"
+
+
+def test_frequent_term_named_in_a_heading_is_not_flagged_as_undefined():
+    # plan/07-troubleshooting-backlog.md#a-3: a term this frequent, with its
+    # own dedicated section, is assumed to be explained there even though
+    # no explicit in-text definition pattern matched.
+    text = (
+        "2 Graph Attention Networks. Graph Attention Networks use learned "
+        "attention weights over neighbors. Graph Attention Networks scale to "
+        "large graphs. This section analyzes why Graph Attention Networks work."
+    )
+    entries = HeuristicGlossaryExtractor().extract(
+        text, heading_texts=["2 Graph Attention Networks"]
+    )
+    assert not any(e.term == "Graph Attention Networks" for e in entries)
+
+
+def test_frequent_term_not_named_in_any_heading_still_becomes_concordance_entry():
+    # heading_texts is scoped to exactly this paper's own headings -- an
+    # unrelated heading must not accidentally suppress an otherwise-genuine
+    # concordance entry.
+    text = (
+        "The Transformer Model processes the input sequence. "
+        "We fine-tune the Transformer Model on our dataset. "
+        "Results show the Transformer Model outperforms prior work."
+    )
+    entries = HeuristicGlossaryExtractor().extract(text, heading_texts=["1 Introduction", "3 Conclusion"])
+    assert any(e.term == "Transformer Model" for e in entries)
+
+
+def test_bare_proper_noun_is_excluded_via_ner():
+    # plan/07-troubleshooting-backlog.md#b-1: "Earth" (and similar trivial
+    # proper nouns not covered by the static common-word list) should be
+    # excluded generally, not just after being individually reported and
+    # added to a list.
+    text = (
+        "Earth has a diverse climate. Researchers studied Earth extensively. "
+        "Earth remains the focus of this analysis. Data about Earth was collected."
+    )
+    entries = HeuristicGlossaryExtractor().extract(text)
+    assert not any(e.term == "Earth" for e in entries)
+
+
+def test_compound_term_built_from_a_proper_noun_derived_word_is_preserved():
+    # The NER-based filter only ever removes single-word candidates --
+    # "Bayesian" alone is exactly the kind of thing it should catch, but
+    # "Bayesian Inference" is legitimate domain jargon and must survive,
+    # mirroring how the existing common-word filter already protects
+    # multi-word compounds built from ordinary words.
+    text = (
+        "Bayesian Inference is used throughout this work. We apply Bayesian "
+        "Inference to estimate the posterior. Bayesian Inference converges "
+        "quickly on this dataset. Bayesian Inference is compared to baselines."
+    )
+    entries = HeuristicGlossaryExtractor().extract(text)
+    assert any(e.term == "Bayesian Inference" for e in entries)
+
+
+def test_all_caps_acronym_is_not_excluded_by_the_proper_noun_filter():
+    # spaCy sometimes mislabels a short all-caps acronym as an organization
+    # -- an all-caps single word is far more likely to be legitimate domain
+    # jargon than an actual org name, so the NER filter skips it entirely.
+    text = (
+        "GCN models aggregate neighborhood information. GCN training is "
+        "efficient on sparse graphs. GCN remains a strong baseline here."
+    )
+    entries = HeuristicGlossaryExtractor().extract(text)
+    assert any(e.term == "GCN" for e in entries)

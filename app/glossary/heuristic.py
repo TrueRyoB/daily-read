@@ -27,6 +27,13 @@ from app.models import GlossaryEntry
 _DEFINITION_RE = re.compile(
     r"\b((?:[A-Z][A-Za-z\-]*\s+){1,6}[A-Z][A-Za-z\-]*)\s*\(([A-Z]{2,10})\)"
 )
+# The reverse order ("SVM (Support Vector Machine)") is at least as common
+# in papers as "Support Vector Machine (SVM)" -- plan/07-troubleshooting-
+# backlog.md#a-3: terms defined this way were being missed entirely and
+# wrongly surfaced as "undefined" in the pre-reading column.
+_DEFINITION_RE_REVERSED = re.compile(
+    r"\b([A-Z]{2,10})\s*\(((?:[A-Z][A-Za-z\-]*\s+){0,5}[A-Z][A-Za-z\-]*)\)"
+)
 _CANDIDATE_RE = re.compile(r"\b(?:[A-Z][a-zA-Z\-]{2,}(?:\s+[A-Z][a-zA-Z\-]{2,}){0,3})\b")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -55,6 +62,33 @@ _DICTIONARY_PATH = Path(__file__).parent / "dictionaries" / "common_abbreviation
 _COMMON_WORDS_PATH = Path(__file__).parent / "dictionaries" / "common_english_words.txt"
 _VENUE_NAMES_PATH = Path(__file__).parent / "dictionaries" / "academic_venue_names.txt"
 
+# Proper nouns are excluded from single-word candidates entirely (plan/07-
+# troubleshooting-backlog.md#b-1): person/place/organization names are
+# essentially never worth defining, and unlike common-word filtering this
+# can't be solved by a static list (the set of possible names is
+# unbounded -- "Earth" today, some other never-listed place/person name
+# tomorrow). NER via spaCy's small English model generalizes instead of
+# requiring per-incident list maintenance.
+#
+# This deliberately only ever removes single-word candidates (see the
+# `len(words) == 1` guard at the call site): a multi-word candidate built
+# from a proper-noun-derived adjective ("Bayesian Inference", "Markov
+# Chain") is still legitimate domain jargon, exactly like the existing
+# common-word filter already protects multi-word candidates built from
+# ordinary words ("Random Forest"). It also skips ALL-CAPS candidates
+# ("GCN", "IEEE"): spaCy sometimes tags a short acronym as an
+# organization, but an all-caps single word is far more likely to be
+# legitimate domain jargon than an actual org name, and known venues/
+# authors are already handled by their own dedicated mechanisms.
+_NER_EXCLUDE_LABELS = {"PERSON", "NORP", "FAC", "ORG", "GPE", "LOC"}
+
+# Lazily loaded (~1s the first time) and cached at module level so it's
+# paid once per process, not once per paper. Sentinel string (not None)
+# distinguishes "not attempted yet" from "attempted and unavailable" so a
+# missing/uninstalled model degrades to skipping this filter instead of
+# retrying (and failing) on every single paper.
+_nlp = "unloaded"
+
 
 class HeuristicGlossaryExtractor:
     """Default GlossaryExtractor: pattern-based, no external calls, $0 cost."""
@@ -62,16 +96,31 @@ class HeuristicGlossaryExtractor:
     def __init__(self) -> None:
         self._bundled_dictionary = _load_bundled_dictionary()
 
-    def extract(self, full_text: str, known_names: list[str] | None = None) -> list[GlossaryEntry]:
+    def extract(
+        self,
+        full_text: str,
+        known_names: list[str] | None = None,
+        heading_texts: list[str] | None = None,
+    ) -> list[GlossaryEntry]:
         """known_names (plan/05-c): the paper's own authors plus its
         reference list's authors, already parsed by tei_parse.py. Frequent
         candidates matching one of these are excluded -- e.g. "Ward" or
         "Guo" showing up as an "undefined term" because a cited author's
-        surname happens to recur, rather than because it's real jargon."""
+        surname happens to recur, rather than because it's real jargon.
+
+        heading_texts (plan/07-troubleshooting-backlog.md#a-3): this
+        paper's own section headings. A frequent candidate also named in a
+        heading is assumed to be explained in that section even though no
+        explicit in-text definition pattern matched -- this is the main
+        lever for not wrongly claiming a term is "undefined" (papers
+        define concepts in far more ways than a parenthetical acronym
+        expansion, and enumerating every natural-language definition style
+        as a regex doesn't converge)."""
         sentences = _SENTENCE_SPLIT_RE.split(full_text)
         entries: list[GlossaryEntry] = []
         seen_keys: set[str] = set()
         excluded_full_names, excluded_name_tokens = _build_name_exclusion_sets(known_names or [])
+        excluded_ner_tokens = _build_ner_exclusion_tokens(full_text)
 
         for phrase, acronym in self._find_in_text_definitions(full_text):
             key = normalize_term_key(acronym)
@@ -87,7 +136,9 @@ class HeuristicGlossaryExtractor:
                 )
             )
 
-        candidates = self._frequent_candidates(full_text, excluded_full_names, excluded_name_tokens)
+        candidates = self._frequent_candidates(
+            full_text, excluded_full_names, excluded_name_tokens, excluded_ner_tokens, heading_texts or []
+        )
         for term, count in candidates.items():
             if count < _MIN_CONCORDANCE_FREQUENCY or len(entries) >= _MAX_ENTRIES:
                 continue
@@ -114,11 +165,19 @@ class HeuristicGlossaryExtractor:
             phrase, acronym = match.group(1).strip(), match.group(2).strip()
             if _initials(phrase) == acronym.upper():
                 found.append((phrase, acronym))
+        for match in _DEFINITION_RE_REVERSED.finditer(full_text):
+            acronym, phrase = match.group(1).strip(), match.group(2).strip()
+            if _initials(phrase) == acronym.upper():
+                found.append((phrase, acronym))
         return found
 
     @staticmethod
     def _frequent_candidates(
-        full_text: str, excluded_full_names: set[str], excluded_name_tokens: set[str]
+        full_text: str,
+        excluded_full_names: set[str],
+        excluded_name_tokens: set[str],
+        excluded_ner_tokens: set[str],
+        heading_texts: list[str],
     ) -> "Counter[str]":
         counts: Counter[str] = Counter()
         for match in _CANDIDATE_RE.finditer(full_text):
@@ -148,14 +207,26 @@ class HeuristicGlossaryExtractor:
             # reference list's authors are known in advance (already parsed
             # elsewhere), so an exact full-name match, or a single-word
             # candidate matching one name component (surname/forename), is
-            # excluded. This only catches names already known from this
-            # paper's own metadata -- not general proper-noun detection
-            # (that would need NER, a much heavier dependency).
+            # excluded.
             if candidate.lower() in excluded_full_names:
                 continue
             if len(words) == 1 and first_word in excluded_name_tokens:
                 continue
+            # General proper-noun detection via NER (plan/07-troubleshooting-
+            # backlog.md#b-1) -- single-word, non-acronym-shaped only; see
+            # the module-level comment on _NER_EXCLUDE_LABELS for why.
+            if len(words) == 1 and not candidate.isupper() and first_word in excluded_ner_tokens:
+                continue
             counts[candidate] += 1
+
+        # Heading opt-out (plan/07-troubleshooting-backlog.md#a-3), applied
+        # once per unique surviving candidate rather than per occurrence: a
+        # paper has only a handful of headings to check against, however
+        # many times the candidate itself recurs in the body.
+        for candidate in list(counts.keys()):
+            if _heading_contains_term(heading_texts, candidate):
+                del counts[candidate]
+
         return Counter(dict(counts.most_common()))  # most-frequent-first so _MAX_ENTRIES keeps the best
 
 
@@ -166,6 +237,46 @@ def _build_name_exclusion_sets(known_names: list[str]) -> tuple[set[str], set[st
     full_names = {name.lower() for name in known_names if name}
     tokens = {word.lower() for name in known_names for word in name.split()}
     return full_names, tokens
+
+
+def _get_nlp():
+    """Lazy-loaded, process-wide spaCy pipeline for proper-noun detection
+    (plan/07-troubleshooting-backlog.md#b-1). Returns None (never raises)
+    if spaCy or its English model isn't installed, so a missing optional
+    dependency degrades to "skip this filter" instead of breaking glossary
+    extraction entirely."""
+    global _nlp
+    if _nlp == "unloaded":
+        try:
+            import spacy
+
+            _nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
+        except Exception:
+            _nlp = None
+    return _nlp
+
+
+def _build_ner_exclusion_tokens(full_text: str) -> set[str]:
+    nlp = _get_nlp()
+    if nlp is None:
+        return set()
+    doc = nlp(full_text)
+    tokens: set[str] = set()
+    for ent in doc.ents:
+        if ent.label_ not in _NER_EXCLUDE_LABELS:
+            continue
+        tokens.update(word.lower() for word in ent.text.split())
+    return tokens
+
+
+def _heading_contains_term(heading_texts: list[str], term: str) -> bool:
+    """True if `term` (allowing a trailing plural "s") appears in any of
+    this paper's own section headings (plan/07-troubleshooting-
+    backlog.md#a-3)."""
+    if not heading_texts:
+        return False
+    pattern = re.compile(rf"\b{re.escape(term)}s?\b", re.IGNORECASE)
+    return any(pattern.search(heading) for heading in heading_texts)
 
 
 def _strip_leading_common_words(candidate: str) -> str | None:

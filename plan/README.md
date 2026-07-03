@@ -95,6 +95,7 @@
 | 04 | [04-glossary-quality-and-user-vocabulary.md](04-glossary-quality-and-user-vocabulary.md) | 頻出語彙抽出の質が低い（一般英単語・参考文献ノイズ混入・単複重複）＋利用者ごとの既知語彙を永続的にopt-outする仕組みが無い | 実装完了 |
 | 05 | [05-user-feedback-round2.md](05-user-feedback-round2.md) | 実際にDockerで使用後のフィードバック（引用リンク不具合・図表文中参照・語彙フィルタ改善・検索文脈化・30分表現削除・非同期進捗表示・注釈機能・日英切替） | 実装完了（05-a〜05-h、05-iは提案のみ） |
 | 06 | [06-performance-investigation.md](06-performance-investigation.md) | 300KB程度のPDFでもGROBID呼び出しがTLEする。定量計測・MECE工程分解・ボトルネック特定・対応 | 実装完了（consolidation無効化＋所要時間ログ／コミットID付与。ライブDocker環境での効果確認は未実施） |
+| 07 | [07-troubleshooting-backlog.md](07-troubleshooting-backlog.md) | 追加フィードバック第3弾（コメントUX・図表拡大表示・語彙誤検出・未定義語判定・モバイル引用展開）＋恒久的トラブルシューティング一覧 | 区分A（A-1〜A-4）・B-1〜B-4実装完了（143テスト全パス）。B-5〜B-8・07-aフル対応は方向性決定待ちで未着手 |
 
 ## 共通点（横断観察）
 

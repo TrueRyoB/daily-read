@@ -66,6 +66,16 @@ body {
   font-size: 0.9rem;
 }
 
+.calendar-nav-link {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.calendar-nav-link:hover {
+  color: var(--accent);
+}
+
 .lang-toggle {
   margin-left: auto;
   color: var(--muted);
@@ -79,6 +89,96 @@ body {
 .lang-toggle:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+
+/* ---- calendar view (calendar.html, plan/07-troubleshooting-backlog.md#b-4) ---- */
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.calendar-nav h1 {
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.calendar-nav a {
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.calendar-nav a:hover {
+  text-decoration: underline;
+}
+
+.calendar-grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.calendar-grid th {
+  padding: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.calendar-cell {
+  vertical-align: top;
+  border: 1px solid var(--border);
+  padding: 0.4rem;
+  height: 5.5rem;
+  overflow: hidden;
+}
+
+.calendar-cell-empty {
+  background: var(--panel-bg);
+  border-color: transparent;
+}
+
+.calendar-cell-has-papers {
+  background: var(--accent-soft);
+}
+
+.calendar-day-number {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.calendar-paper-link {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.15rem;
+}
+
+.calendar-paper-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@media (max-width: 860px) {
+  .calendar-cell {
+    height: auto;
+    min-height: 3.5rem;
+  }
+  .calendar-grid th {
+    font-size: 0.7rem;
+    padding: 0.2rem;
+  }
 }
 
 main {
@@ -637,6 +737,10 @@ main {
 
 .figures-panel:hover .panel-item {
   opacity: 1;
+}
+
+.figure-card {
+  cursor: zoom-in; /* clicking the (small) panel thumbnail opens the large modal -- plan/07#a-1 */
 }
 
 .figure-card img {

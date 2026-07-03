@@ -117,6 +117,10 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
 
   const figures = JSON.parse(figuresDataEl.textContent || "[]");
   const figureById = new Map(figures.map((f) => [f.figure_id, f]));
+  const bibliographyDataEl = document.getElementById("bibliography-data");
+  const bibliographyByBibId = new Map(
+    (bibliographyDataEl ? JSON.parse(bibliographyDataEl.textContent || "[]") : []).map((b) => [b.bib_id, b])
+  );
   const figuresPanel = document.querySelector(".figures-panel");
   const modalImg = modal.querySelector("img");
   const modalCaption = modal.querySelector("figcaption");
@@ -131,6 +135,23 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
 
   function hideModal() {
     modal.hidden = true;
+  }
+
+  // plan/07-troubleshooting-backlog.md#a-2: on a narrow screen, jumping to
+  // the reference list is easy to miss entirely. Toggle the citation's own
+  // visible text between "[1]" and the full reference instead -- no
+  // scrolling, no separate section to find.
+  function toggleCitationLabel(link, bibId) {
+    const entry = bibliographyByBibId.get(bibId);
+    if (!entry) return;
+    if (link.dataset.expanded === "true") {
+      link.textContent = link.dataset.originalLabel;
+      link.dataset.expanded = "false";
+    } else {
+      link.dataset.originalLabel = link.dataset.originalLabel || link.textContent;
+      link.textContent = entry.label;
+      link.dataset.expanded = "true";
+    }
   }
 
   // Used for both figure-jump targets (figure cards) and citation targets
@@ -156,11 +177,21 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
       const figureId = jumpLink.getAttribute("href").slice(1);
       const figure = figureById.get(figureId);
       if (!figure) return;
-      if (isMobileLayout()) {
-        showModal(figure);
-      } else {
-        scrollToPanelItem(figureId);
-      }
+      // plan/07-troubleshooting-backlog.md#a-1: the desktop panel image is
+      // too small to read comfortably -- open the same large modal mobile
+      // already gets. Desktop additionally still highlights/scrolls the
+      // panel copy, so the "independent side column" context (plan/01)
+      // isn't lost, just no longer the only way to see the figure.
+      if (!isMobileLayout()) scrollToPanelItem(figureId);
+      showModal(figure);
+      return;
+    }
+    // Clicking the (small) panel thumbnail itself also opens the same
+    // large modal -- desktop only; mobile never shows this panel at all.
+    const panelFigureCard = event.target.closest(".figure-card");
+    if (panelFigureCard && !isMobileLayout()) {
+      const figure = figureById.get(panelFigureCard.id);
+      if (figure) showModal(figure);
       return;
     }
     const citationLink = event.target.closest(".citation");
@@ -169,20 +200,21 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
       // Only in-page bibliography anchors ("#bib-b0") are handled here;
       // an external DOI/URL href should open normally.
       if (href.startsWith("#")) {
-        const bibId = href.slice(1);
-        // Desktop and mobile render two separate copies of the
-        // bibliography with distinct ids ("bib-bX" vs "bib-mobile-bX") --
-        // see plan/05-user-feedback-round2.md#05-a. Always resolve and
-        // scroll explicitly instead of relying on the browser's native
-        // anchor jump, which resolves duplicate/hidden ids inconsistently.
-        const target = isMobileLayout() ? "bib-mobile-" + bibId : bibId;
+        // href is "#bib-b0" -- strip both the "#" and the "bib-" prefix to
+        // get the raw id ("b0") shared by both the desktop element
+        // ("bib-b0") and the mobile one ("bib-mobile-b0"). Previously this
+        // kept the "bib-" prefix and re-prepended "bib-mobile-", producing
+        // "bib-mobile-bib-b0" -- a nonexistent id, so the mobile branch's
+        // `if (el)` check always failed silently (no scroll, no
+        // preventDefault, so the browser's own anchor-jump to the hidden
+        // desktop copy ran instead -- exactly the "URL changes, nothing
+        // visibly happens" symptom reported in
+        // plan/07-troubleshooting-backlog.md#a-2).
+        const bibId = href.slice(1).replace(/^bib-/, "");
         if (isMobileLayout()) {
-          const el = document.getElementById(target);
-          if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "start" });
-            event.preventDefault();
-          }
-        } else if (scrollToPanelItem(target)) {
+          toggleCitationLabel(citationLink, bibId);
+          event.preventDefault();
+        } else if (scrollToPanelItem("bib-" + bibId)) {
           event.preventDefault();
         }
       }

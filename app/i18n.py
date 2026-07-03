@@ -58,6 +58,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ap_cancel": "キャンセル",
         "ap_note_placeholder": "メモを入力",
         "ap_confirm_delete": "このメモを削除しますか？",
+        "calendar_nav_label": "カレンダー",
+        "calendar_heading": "{year}年{month}月",
+        "calendar_prev": "← 前月",
+        "calendar_next": "次月 →",
+        "calendar_weekdays": "日,月,火,水,木,金,土",
     },
     "en": {
         "tagline": "Make papers easier to read",
@@ -107,6 +112,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ap_cancel": "Cancel",
         "ap_note_placeholder": "Enter a note",
         "ap_confirm_delete": "Delete this note?",
+        "calendar_nav_label": "Calendar",
+        "calendar_heading": "{month_name} {year}",
+        "calendar_prev": "← Previous",
+        "calendar_next": "Next →",
+        "calendar_weekdays": "Sun,Mon,Tue,Wed,Thu,Fri,Sat",
     },
 }
 

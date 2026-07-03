@@ -8,6 +8,7 @@ request time.
 
 from __future__ import annotations
 
+import calendar as _calendar_module
 import html
 import json
 import os
@@ -69,6 +70,27 @@ def table_of_contents(rendered_units: list[dict]) -> list[dict]:
 def glossary_json(glossary: list[dict]) -> str:
     """Serialize the glossary for reader.js to build its popover lookup from."""
     return json.dumps(glossary, ensure_ascii=False)
+
+
+def bibliography_json(bibliography: list[dict]) -> str:
+    """Serialize the bibliography for reader.js's mobile "tap citation to
+    expand" behavior (plan/07-troubleshooting-backlog.md#a-2): the desktop
+    side panel (plan/01) isn't practical on a narrow screen, and a plain
+    page-internal anchor jump to the reference list is easy to miss --
+    tapping an inline "[1]" instead swaps its own text for the full
+    reference right where the reader is already looking."""
+    payload = [{"bib_id": entry["bib_id"], "label": _bibliography_label(entry)} for entry in bibliography]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _bibliography_label(entry: dict) -> str:
+    parts = []
+    if entry.get("authors"):
+        parts.append(", ".join(entry["authors"]) + ".")
+    if entry.get("year"):
+        parts.append(f"({entry['year']})")
+    parts.append(entry.get("title") or "")
+    return "[" + " ".join(p for p in parts if p) + "]"
 
 
 def figures_json(figures: list[dict], paper_id: str) -> str:
@@ -144,12 +166,17 @@ def annotations_json(annotations: list[dict]) -> str:
     return json.dumps(annotations, ensure_ascii=False)
 
 
+_TITLE_CONTEXT_MAX_WORDS = 6
+_TITLE_CLAUSE_SEPARATORS = (":", " — ", " – ", " - ")
+
+
 def search_url(term: str, paper_title: str) -> str:
     """Build the "look this up" link for a pre-reading term (plan/04-c,
-    revised in plan/05-d). The paper's title is appended as cheap,
-    always-available context so a search for an ambiguous short term (e.g.
-    "GAT") isn't completely bare -- a lightweight stand-in for "infer the
-    paper's subject and use it as context," using data we already have.
+    revised in plan/05-d, revised again in
+    plan/07-troubleshooting-backlog.md#a-3). Some context is appended so a
+    search for an ambiguous short term (e.g. "GAT") isn't completely bare
+    -- a lightweight stand-in for "infer the paper's subject and use it as
+    context," using data we already have.
 
     The search engine is configurable via the SEARCH_ENGINE_URL_TEMPLATE
     env var (must contain a "{query}" placeholder) because there is no way
@@ -157,9 +184,26 @@ def search_url(term: str, paper_title: str) -> str:
     -- that's an address-bar-only browser feature a page can't trigger.
     Default is Google.
     """
-    query = f'"{term}" {paper_title}'.strip()
+    query = f'"{term}" {_coarse_title_context(paper_title)}'.strip()
     template = os.environ.get("SEARCH_ENGINE_URL_TEMPLATE", _DEFAULT_SEARCH_ENGINE_URL_TEMPLATE)
     return template.format(query=quote_plus(query))
+
+
+def _coarse_title_context(paper_title: str) -> str:
+    """A deliberately coarser stand-in for "the paper's subject" than the
+    full title: appending the entire title over-constrains the query,
+    since an external page explaining a general term is unlikely to also
+    match a paper's exact, often long and unique, wording (plan/07-
+    troubleshooting-backlog.md#a-3 -- reported as searches that "should"
+    hit something not finding it). Most academic titles put the general
+    topic before a colon/dash-separated subtitle ("Topic: specific
+    contribution detail"), so that first clause is used when present;
+    otherwise, fall back to just the title's first few words.
+    """
+    for sep in _TITLE_CLAUSE_SEPARATORS:
+        if sep in paper_title:
+            return paper_title.split(sep, 1)[0].strip()
+    return " ".join(paper_title.split()[:_TITLE_CONTEXT_MAX_WORDS])
 
 
 def _build_annotator(terms: list[str], bib_by_id: dict[str, dict]):
@@ -205,3 +249,31 @@ def _figure_mention_link(match: re.Match) -> str:
     # inline mention is now the only place that class is emitted from.
     figure_id, label = match.group(1), match.group(2)
     return f'<a class="figure-jump" href="#{html.escape(figure_id, quote=True)}">{label}</a>'
+
+
+def build_calendar_month(papers: list[dict], year: int, month: int) -> dict:
+    """Group papers by the date portion of `created_at` into a month-grid
+    structure for calendar.html (plan/07-troubleshooting-backlog.md#b-4).
+    Pure function so the grid layout itself is testable without going
+    through the HTTP route.
+
+    Sunday-first weeks (calendar.Calendar(firstweekday=6)); a day outside
+    the requested month is represented as None so the template can render
+    an empty cell for it.
+    """
+    papers_by_date: dict[str, list[dict]] = {}
+    for paper in papers:
+        papers_by_date.setdefault(paper["created_at"][:10], []).append(paper)
+
+    weeks = []
+    for week in _calendar_module.Calendar(firstweekday=6).monthdayscalendar(year, month):
+        cells = []
+        for day in week:
+            if day == 0:
+                cells.append(None)
+                continue
+            date_key = f"{year:04d}-{month:02d}-{day:02d}"
+            cells.append({"day": day, "date": date_key, "papers": papers_by_date.get(date_key, [])})
+        weeks.append(cells)
+
+    return {"year": year, "month": month, "weeks": weeks}

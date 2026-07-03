@@ -63,7 +63,10 @@
   </details>
   {% endif %}
 
-  <details class="annotations-queue" {% if not annotations %}hidden{% endif %}>
+  {# plan/07-troubleshooting-backlog.md#b-2: open by default so notes are
+     visible at a glance without an extra click, and so the browser's
+     native find-in-page can actually see/auto-expand into their text. #}
+  <details class="annotations-queue" {% if not annotations %}hidden{% else %}open{% endif %}>
     <summary>{{ t('annotations_heading', count=annotations | length) }}</summary>
     <ul data-role="annotation-list">
       {% for annotation in annotations %}
@@ -140,6 +143,7 @@
 
 <script type="application/json" id="glossary-data">{{ glossary_json | safe }}</script>
 <script type="application/json" id="figures-data">{{ figures_json | safe }}</script>
+<script type="application/json" id="bibliography-data">{{ bibliography_json | safe }}</script>
 <script type="application/json" id="annotations-data">{{ annotations_json | safe }}</script>
 <div id="glossary-popover" class="glossary-popover" hidden></div>
 

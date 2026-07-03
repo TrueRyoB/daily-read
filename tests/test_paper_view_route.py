@@ -103,6 +103,27 @@ def test_figures_data_and_modal_markup_present(isolated_data_dir, tmp_path, monk
     assert figures_payload[0]["caption"] == "Figure 1: Overview of the attention-pooled message passing pipeline."
 
 
+def test_bibliography_data_present_for_mobile_citation_expand(isolated_data_dir, tmp_path, monkeypatch):
+    # plan/07-troubleshooting-backlog.md#a-2: reader.js reads this to swap
+    # a tapped "[1]" for the full reference text on narrow screens.
+    monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: load_golden_tei())
+    pdf_path = blank_pdf(tmp_path, pages=2)
+    paper_id = pipeline.process_upload("sample.pdf", open(pdf_path, "rb").read())
+
+    html = TestClient(app).get(f"/papers/{paper_id}").text
+    assert 'id="bibliography-data"' in html
+
+    import json as _json
+    import re
+
+    match = re.search(r'<script type="application/json" id="bibliography-data">(.*?)</script>', html, re.DOTALL)
+    payload = _json.loads(match.group(1))
+    assert {
+        "bib_id": "b0",
+        "label": "[Thomas Kipf. (2017) Semi-Supervised Classification with Graph Convolutional Networks]",
+    } in payload
+
+
 def test_inline_figure_mention_renders_as_link_and_old_button_is_gone(isolated_data_dir, tmp_path, monkeypatch):
     figure_mention_tei = f"""<?xml version="1.0"?>
     <TEI xmlns="{_TEI_NS}">

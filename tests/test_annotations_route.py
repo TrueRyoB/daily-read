@@ -36,7 +36,9 @@ def test_create_annotation_then_reload_shows_marker_and_queue_entry(isolated_dat
 
     html = client.get(f"/papers/{paper_id}").text
     assert '<details class="annotations-queue"' in html
-    assert "hidden" not in html.split('<details class="annotations-queue"')[1].split(">")[0]
+    # plan/07-troubleshooting-backlog.md#b-2: open by default (not just
+    # "not hidden") so notes are visible without an extra click.
+    assert '<details class="annotations-queue" open>' in html
     assert "key idea" in html
     assert f'data-annotation-id="{annotation["id"]}"' in html
     assert 'class="annotation-marker"' in html
