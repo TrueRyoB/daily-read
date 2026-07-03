@@ -1,7 +1,7 @@
 [project]
 name = "daily-read"
 version = "0.1.0"
-description = "Turn PDF papers into a single-column, glossary-annotated reading view for a 30-minute morning habit."
+description = "Turn PDF papers into a single-column, glossary-annotated reading view that's easier to read."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.111",

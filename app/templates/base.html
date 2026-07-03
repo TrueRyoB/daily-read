@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="{{ locale }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,7 +9,11 @@
 <body>
   <header class="site-header">
     <a class="site-title" href="/">daily-read</a>
-    <span class="site-tagline">毎朝30分で論文を読む</span>
+    <span class="site-tagline">{{ t('tagline') }}</span>
+    {# plan/05-h: papers are English but the UI defaulted to Japanese-only
+       -- a toggle link switches locale via ?lang= and persists it in a
+       cookie so it sticks across navigation. #}
+    <a class="lang-toggle" href="?lang={{ 'en' if locale == 'ja' else 'ja' }}">{{ t('lang_toggle_label') }}</a>
   </header>
   <main>
     {% block content %}{% endblock %}

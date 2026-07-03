@@ -66,6 +66,21 @@ body {
   font-size: 0.9rem;
 }
 
+.lang-toggle {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.lang-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 main {
   max-width: 60rem;
   margin: 0 auto;
@@ -163,6 +178,75 @@ main {
   color: var(--muted);
 }
 
+/* ---- processing view (processing.html) ---- */
+
+.processing-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  max-width: 32rem;
+  margin: 2rem auto;
+}
+
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 0 auto 1.25rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.processing-panel h1 {
+  font-size: 1.3rem;
+  margin: 0 0 0.75rem;
+}
+
+.processing-elapsed {
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+.processing-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 1.5rem;
+}
+
+.notify-button {
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.notify-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.notify-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.processing-error h1 {
+  font-size: 1.3rem;
+  color: var(--accent);
+}
+
 /* ---- reading view (paper.html) ---- */
 
 .reader-header h1 {
@@ -171,12 +255,308 @@ main {
   margin-bottom: 0.4rem;
 }
 
+.reader-authors,
 .reading-meta,
 .reader-source,
-.glossary-hint {
+.glossary-hint,
+.annotation-hint {
   color: var(--muted);
   font-size: 0.95rem;
   margin: 0.2rem 0;
+}
+
+.reader-abstract {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--accent-soft);
+  background: var(--panel-bg);
+  border-radius: 0 8px 8px 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  max-width: var(--max-measure);
+}
+
+.toc {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  max-width: var(--max-measure);
+}
+
+.toc summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.25rem 0;
+}
+
+.toc nav {
+  margin-top: 0.6rem;
+}
+
+.toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.toc a {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.toc a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.toc-level-2 {
+  margin-left: 1.1rem;
+}
+
+.toc-level-3 {
+  margin-left: 2.2rem;
+}
+
+.preread-terms {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  max-width: var(--max-measure);
+}
+
+.preread-terms h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1.05rem;
+}
+
+.preread-hint {
+  margin: 0 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.preread-terms ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.preread-terms li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.preread-term {
+  font-weight: 700;
+}
+
+.preread-terms a {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.preread-terms .mark-known {
+  margin-left: auto;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.preread-terms .mark-known:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* ---- annotations (plan/05-g): margin notes, styled like .toc/.preread-terms ---- */
+
+.annotations-queue {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  max-width: var(--max-measure);
+}
+
+.annotations-queue summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.25rem 0;
+}
+
+.annotations-queue ul {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.annotation-queue-item {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.annotation-queue-item .annotation-quote {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.annotation-queue-item .annotation-note-text {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+}
+
+.annotation-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.annotation-queue-actions button {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.annotation-queue-actions button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.annotation-not-found {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.annotated-block {
+  position: relative;
+}
+
+.annotation-marker {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85em;
+  padding: 0 0.3em 0 0;
+  vertical-align: text-top;
+  line-height: 1;
+}
+
+.annotation-flash {
+  animation: annotation-flash-fade 1.5s ease;
+}
+
+@keyframes annotation-flash-fade {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.annotation-add-btn {
+  position: absolute;
+  z-index: 60;
+  padding: 0.35rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.annotation-popover {
+  position: absolute;
+  z-index: 60;
+  max-width: 20rem;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.annotation-popover .ap-quote {
+  margin: 0 0 0.5rem;
+  font-style: italic;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.annotation-popover .ap-note {
+  margin: 0 0 0.6rem;
+  white-space: pre-wrap;
+}
+
+.annotation-popover .ap-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  margin-bottom: 0.6rem;
+}
+
+.annotation-popover .ap-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.annotation-popover .ap-actions button {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.annotation-popover .ap-actions button:hover {
+  border-color: var(--accent);
 }
 
 .reader-layout {
@@ -204,24 +584,31 @@ main {
   margin: 0 0 1.2rem;
 }
 
-.figure-jump {
-  display: inline-block;
-  margin: 0.5rem 0 1.2rem;
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+/* Inline mentions of a figure/table ("Figure 3") or a citation ("[1]") in
+   running text -- subtle, not a pill button (plan/05-b removed the old
+   standalone "figure-jump" button; .figure-jump is now only ever emitted
+   inline, by rendering.py's _figure_mention_link). */
+.figure-jump,
+.citation {
   color: var(--accent);
-  text-decoration: none;
-  font-size: 0.9rem;
+  text-decoration: underline dotted var(--accent);
+  text-underline-offset: 2px;
+}
+
+.figure-jump:hover,
+.citation:hover {
   background: var(--accent-soft);
 }
 
 .figures-panel {
   position: sticky;
   top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  padding-right: 0.25rem; /* keep the scrollbar off the card borders */
 }
 
 .figures-panel h2 {
@@ -230,12 +617,26 @@ main {
   margin: 0;
 }
 
-.figure-card {
+/* .panel-item: shared dim-until-active/hover behavior for anything living
+   inside the independently-scrolling .figures-panel column -- figure
+   cards and bibliography entries alike (plan/01, plan/03-c). */
+.panel-item {
   margin: 0;
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel-bg);
+  opacity: 0.55;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.panel-item.is-active {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.figures-panel:hover .panel-item {
+  opacity: 1;
 }
 
 .figure-card img {
@@ -250,12 +651,27 @@ main {
   margin-top: 0.5rem;
 }
 
-.figure-back {
-  display: inline-block;
-  font-size: 0.8rem;
+.bibliography-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.bib-entry {
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.bib-entry .bib-index {
+  font-weight: 700;
+  margin-right: 0.3rem;
+}
+
+.bib-entry .bib-authors {
+  color: var(--muted);
+}
+
+.bib-entry a {
   color: var(--accent);
-  margin-bottom: 0.4rem;
-  text-decoration: none;
 }
 
 .gloss {
@@ -307,11 +723,104 @@ main {
   font-size: 1rem;
 }
 
+.glossary-popover .gp-know {
+  display: block;
+  margin-top: 0.6rem;
+  padding: 0.3rem 0;
+  background: none;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  color: inherit;
+  opacity: 0.85;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: inherit;
+  text-align: left;
+}
+
+.glossary-popover .gp-know:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.figure-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.figure-modal[hidden] {
+  display: none;
+}
+
+.figure-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.figure-modal-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--panel-bg);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 1rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+
+.figure-modal-content img {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  border-radius: 6px;
+  margin: 0 auto;
+}
+
+.figure-modal-content figcaption {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.figure-modal-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.6rem;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.bibliography-mobile {
+  display: none;
+}
+
 @media (max-width: 860px) {
   .reader-layout {
     grid-template-columns: 1fr;
   }
   .figures-panel {
-    position: static;
+    display: none;
+  }
+  .bibliography-mobile {
+    display: block;
+    margin: 1.5rem 0;
+    max-width: var(--max-measure);
+  }
+  .bibliography-mobile h2 {
+    font-size: 1.05rem;
+  }
+  .bibliography-mobile .bib-entry {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
   }
 }

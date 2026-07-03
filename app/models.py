@@ -7,39 +7,48 @@ result to JSON explicitly before writing it to disk.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
+# Wire format for an in-text citation ref, embedded directly into
+# ContentUnit.text by tei_parse.py and decoded back out by rendering.py's
+# HTML annotator (plan/03-c). Kept here (not in tei_parse.py or
+# rendering.py) so producer and consumer can't drift out of sync with each
+# other. Uses NUL-byte delimiters: they survive html.escape() untouched
+# (unlike "<"/">") and never occur in real paper text, so they can't be
+# confused with content the paper actually contains.
+CITATION_PLACEHOLDER_RE = re.compile(r"\x00CITE:([^\x00]+)\x00(.*?)\x00/CITE\x00", re.DOTALL)
+
+
+def citation_placeholder(bib_ids: str | list[str], label: str) -> str:
+    """bib_ids is usually a single id, but GROBID sometimes splits one
+    combined citation like "[1, 16]" into multiple adjacent <ref> elements
+    (plan/05-a) -- tei_parse.py merges those into one placeholder carrying
+    all of their ids, comma-joined."""
+    ids = bib_ids if isinstance(bib_ids, str) else ",".join(bib_ids)
+    return f"\x00CITE:{ids}\x00{label}\x00/CITE\x00"
+
+
+# Separate wire format (not reusing CITATION_PLACEHOLDER_RE) for in-text
+# mentions of a figure/table ("as shown in Figure 3"), so rendering.py can
+# tell the two apart without guessing from the id's shape (plan/05-b).
+FIGURE_MENTION_PLACEHOLDER_RE = re.compile(r"\x00FIGREF:([^\x00]+)\x00(.*?)\x00/FIGREF\x00", re.DOTALL)
+
+
+def figure_mention_placeholder(figure_id: str, label: str) -> str:
+    return f"\x00FIGREF:{figure_id}\x00{label}\x00/FIGREF\x00"
+
 
 @dataclass
-class TextBlock:
-    """One PyMuPDF text block on a single page, with layout metadata."""
+class BibliographyEntry:
+    """One entry in the paper's reference list, parsed from text/back."""
 
-    page_number: int
-    bbox: tuple[float, float, float, float]  # (x0, y0, x1, y1)
-    text: str
-    font_size: float
-    bold: bool
-
-
-@dataclass
-class ImageBlock:
-    """One embedded image on a page, before caption pairing."""
-
-    page_number: int
-    bbox: tuple[float, float, float, float]
-    image_bytes: bytes
-    ext: str
-
-
-@dataclass
-class PageContent:
-    """Raw extraction output for a single page."""
-
-    page_number: int
-    width: float
-    height: float
-    text_blocks: list[TextBlock] = field(default_factory=list)
-    images: list[ImageBlock] = field(default_factory=list)
+    bib_id: str  # matches a <ref type="bibr" target="#bib_id"> in body text
+    index: int  # 1-indexed position in the reference list, for display (e.g. "[3]")
+    authors: list[str]
+    title: str
+    year: str | None
+    url: str | None  # DOI resolved to https://doi.org/... if GROBID found one, else None
 
 
 @dataclass
@@ -79,6 +88,10 @@ class NormalizedDocument:
 
     units: list[ContentUnit]
     figures: list[Figure]
+    title: str | None = None  # from teiHeader; None if GROBID's header parse found nothing
+    authors: list[str] = field(default_factory=list)
+    abstract: str | None = None
+    bibliography: list[BibliographyEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -91,3 +104,6 @@ class PaperContent:
     glossary: list[GlossaryEntry]
     word_count: int
     est_minutes: int
+    authors: list[str] = field(default_factory=list)
+    abstract: str | None = None
+    bibliography: list[BibliographyEntry] = field(default_factory=list)

@@ -1,6 +1,6 @@
 # daily-read
 
-毎朝30分で論文を読む習慣を続けるために、読む前にかかる「高負荷な前処理」を自動で取り除くローカルWebアプリです。
+論文を読みやすくするために、読む前にかかる「高負荷な前処理」を自動で取り除くローカルWebアプリです。
 
 ## 目的
 
@@ -19,24 +19,32 @@ daily-read は PDF ファイルまたは PDF が掲載された URL を受け取
 
 外部の有料APIは一切使用せず、すべてローカルで完結します（運用コストはほぼゼロ）。
 
-## セットアップ
+## セットアップ・起動
 
-Python 3.11 以上が必要です。
+[Docker Desktop](https://www.docker.com/products/docker-desktop/)（またはWSL2上のDocker Engine）が必要です。GROBIDサービスとアプリ本体をまとめて1コマンドで起動します。
 
 ```bash
 cd daily-read  # このリポジトリのルート
-python -m venv .venv
-source .venv/Scripts/activate   # Windows (Git Bash) の場合。PowerShellなら .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+docker compose up -d --build
 ```
 
-## 使い方
+初回はGROBIDイメージの取得とアプリのビルドで数分かかります。起動確認: `curl http://localhost:8070/api/isalive` が `true` を返せばGROBIDの準備完了です（モデルロードで起動直後は数十秒かかることがあります。アプリ自体はPDFアップロード時に初めてGROBIDへ接続するため、多少前後しても問題ありません）。
 
-サーバーを起動します。
+終了する場合は次の1コマンドです。`data/` はホストにバインドマウントされているため、コンテナを終了・削除しても処理済みの論文データは消えません。
 
 ```bash
-uvicorn app.main:app --reload
+docker compose down
 ```
+
+`./app` はボリュームマウントされているため、コード編集はコンテナ再ビルド無しで即座に反映されます（`uvicorn --reload`）。依存パッケージ（`pyproject.toml`）を変更した場合のみ `docker compose up -d --build` で再ビルドしてください。
+
+GROBIDを別ホスト/ポートで動かす場合は環境変数 `GROBID_URL`（デフォルト `http://grobid:8070`、`docker-compose.yml`で設定済み）で向き先を変更できます。
+
+デフォルトでは、タイトル・著者・参考文献の精度を上げるため、GROBIDにCrossRef/biblio-glutton経由の外部照合（consolidation）を有効化してリクエストします。GROBIDコンテナに外向きの通信ができない環境や、処理を高速化したい場合は環境変数 `GROBID_CONSOLIDATE=0` で無効化できます（完全ローカルの抽出のみになります。`docker-compose.yml`の`app.environment`に追加してください）。
+
+読書ビューの「読む前に確認」欄にある「調べる」リンクは、デフォルトでGoogle検索を開きます。他の検索エンジンを使いたい場合は環境変数 `SEARCH_ENGINE_URL_TEMPLATE`（`{query}`をクエリ文字列の差し込み位置として含む必要があります。例: `https://duckduckgo.com/?q={query}`）で変更できます。ページのリンクからブラウザの既定検索エンジンを呼び出す標準的な方法は存在しないため、この環境変数での明示指定という形にしています。
+
+## 使い方
 
 ブラウザで `http://localhost:8000` を開くと、以下の画面が表示されます。
 
@@ -65,21 +73,30 @@ uvicorn app.main:app --reload
 
 ## テスト
 
+テストはGROBID/Dockerを一切必要とせず、ローカルのPythonだけで完結します（オフラインのフィクスチャでGROBID呼び出しをモックしています）。
+
 ```bash
+python -m venv .venv
+source .venv/Scripts/activate   # Windows (Git Bash)。PowerShellなら .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
 python -m pytest tests/
 ```
+
+すでに`docker compose up`している場合は、コンテナ内でも実行できます: `docker compose exec app python -m pytest tests/`
 
 ## ディレクトリ構成
 
 ```
+Dockerfile           アプリ本体のコンテナイメージ定義
+docker-compose.yml   grobid + app の2サービスをまとめて起動する定義
 app/
-  pdf/           PDFからのテキスト・画像抽出、レイアウト正規化
+  pdf/           GROBID連携によるPDF構造抽出(本文/見出し/図表caption/参考文献の分離)とTEI→読書ビュー変換
   glossary/      用語抽出（ヒューリスティック実装 + LLM切り替え用の設計）
   ingestion/     PDFファイル/URLの解決
   pipeline.py    上記を統合する処理フロー
   main.py        FastAPIアプリ本体（履歴一覧・アップロード・読書ビュー）
   templates/     Jinja2テンプレート
   static/        CSS・フォント・JS
-data/            処理済み論文のPDF原本・図表・SQLiteインデックス（gitignore対象）
-tests/           ユニットテスト
+data/            処理済み論文のPDF原本・生TEI・図表・SQLiteインデックス（gitignore対象）
+tests/           ユニットテスト（GROBID不要、オフラインで完結）
 ```

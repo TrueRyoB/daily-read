@@ -26,7 +26,7 @@ from app.models import GlossaryEntry
 
 
 class LLMGlossaryExtractor:
-    def extract(self, full_text: str) -> list[GlossaryEntry]:
+    def extract(self, full_text: str, known_names: list[str] | None = None) -> list[GlossaryEntry]:
         raise NotImplementedError(
             "LLM-backed glossary extraction is not implemented yet. "
             "Use GLOSSARY_STRATEGY=heuristic (the default), or implement "

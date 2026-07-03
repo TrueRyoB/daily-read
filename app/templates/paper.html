@@ -1,52 +1,161 @@
 {% extends "base.html" %}
 {% block title %}{{ paper.title }} — daily-read{% endblock %}
+{% macro annotation_markers(unit) %}{% for aid in unit.annotation_ids or [] %}<button type="button" class="annotation-marker" data-annotation-id="{{ aid }}" aria-label="{{ t('annotation_marker_aria') }}">📝</button>{% endfor %}{% endmacro %}
+{% macro bib_entry(entry, in_panel=True) %}
+{# dom_id must be unique across the whole page: the desktop panel and the
+   mobile-only section both render every bibliography entry, and reader.js
+   needs a real, unique id to jump to regardless of which one is visible
+   (see plan/05-user-feedback-round2.md#05-a). #}
+<li id="{% if in_panel %}bib-{{ entry.bib_id }}{% else %}bib-mobile-{{ entry.bib_id }}{% endif %}" class="bib-entry{% if in_panel %} panel-item{% endif %}">
+  <span class="bib-index">[{{ entry.index }}]</span>
+  {%- if entry.authors %} <span class="bib-authors">{{ entry.authors | join(', ') }}.</span>{% endif %}
+  {%- if entry.year %} ({{ entry.year }}){% endif %}
+  {% if entry.url %} <a href="{{ entry.url }}" target="_blank" rel="noopener">{{ entry.title }}</a>
+  {%- else %} {{ entry.title }}{% endif %}
+</li>
+{% endmacro %}
 {% block content %}
-<article class="reader">
+<article class="reader" data-paper-id="{{ paper_id }}">
   <header class="reader-header" id="top">
     <h1>{{ paper.title }}</h1>
+    {% if content.authors %}
+    <p class="reader-authors">{{ content.authors | join(', ') }}</p>
+    {% endif %}
     <p class="reading-meta">
-      推定読了時間: 約{{ content.est_minutes }}分（30分目標の{{ (content.est_minutes / 30 * 100) | round | int }}%）・{{ content.word_count }}語
+      {{ t('reading_meta', minutes=content.est_minutes, words=content.word_count) }}
     </p>
-    <p class="reader-source">出典: {{ paper.source }}</p>
+    <p class="reader-source">{{ t('source_prefix', source=paper.source) }}</p>
     {% if content.glossary %}
-    <p class="glossary-hint">下線付きの語句をクリックすると、意味・用例が表示されます。</p>
+    <p class="glossary-hint">{{ t('glossary_hint') }}</p>
+    {% endif %}
+    <p class="annotation-hint">{{ t('annotation_hint') }}</p>
+    {% if content.abstract %}
+    <p class="reader-abstract">{{ content.abstract }}</p>
     {% endif %}
   </header>
+
+  {% if preread_terms %}
+  <section class="preread-terms">
+    <h2>{{ t('preread_heading') }}</h2>
+    <p class="preread-hint">{{ t('preread_hint') }}</p>
+    <ul>
+      {% for entry in preread_terms %}
+      <li>
+        <span class="preread-term">{{ entry.term }}</span>
+        <a href="{{ search_url(entry.term, content.title) }}" target="_blank" rel="noopener">{{ t('search_link') }}</a>
+        <button type="button" class="mark-known" data-term="{{ entry.term }}">{{ t('mark_known') }}</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if toc_entries %}
+  <details class="toc">
+    <summary>{{ t('toc_heading', count=toc_entries | length) }}</summary>
+    <nav>
+      <ul>
+        {% for entry in toc_entries %}
+        <li class="toc-level-{{ entry.level }}"><a href="#{{ entry.anchor_id }}">{{ entry.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </details>
+  {% endif %}
+
+  <details class="annotations-queue" {% if not annotations %}hidden{% endif %}>
+    <summary>{{ t('annotations_heading', count=annotations | length) }}</summary>
+    <ul data-role="annotation-list">
+      {% for annotation in annotations %}
+      <li class="annotation-queue-item" data-annotation-id="{{ annotation.id }}">
+        <p class="annotation-quote">「{{ annotation.quote }}」</p>
+        <p class="annotation-note-text">{{ annotation.note }}</p>
+        <div class="annotation-queue-actions">
+          {% if annotation.found %}
+          <button type="button" class="annotation-jump" data-annotation-id="{{ annotation.id }}">{{ t('annotation_jump') }}</button>
+          {% else %}
+          <span class="annotation-not-found">{{ t('annotation_not_found') }}</span>
+          {% endif %}
+          <button type="button" class="annotation-edit" data-annotation-id="{{ annotation.id }}">{{ t('edit') }}</button>
+          <button type="button" class="annotation-delete" data-annotation-id="{{ annotation.id }}">{{ t('delete') }}</button>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
 
   <div class="reader-layout">
     <div class="reader-body">
       {% for unit in rendered_units %}
         {% if unit.kind == "heading" %}
-          {% if unit.level == 1 %}<h2>{{ unit.html | safe }}</h2>
-          {% elif unit.level == 2 %}<h3>{{ unit.html | safe }}</h3>
-          {% else %}<h4>{{ unit.html | safe }}</h4>{% endif %}
+          {% if unit.level == 1 %}<h2 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h2>
+          {% elif unit.level == 2 %}<h3 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h3>
+          {% else %}<h4 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h4>{% endif %}
         {% elif unit.kind == "paragraph" %}
-          <p>{{ unit.html | safe }}</p>
-        {% elif unit.kind == "figure_ref" %}
-          {% set fig = figures_by_id.get(unit.figure_id) %}
-          {% if fig %}
-          <a class="figure-jump" href="#{{ fig.figure_id }}">図を見る: {{ fig.label }} ↓</a>
-          {% endif %}
+          <p class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</p>
         {% endif %}
+        {# figure_ref units render nothing now: inline "Figure N" mentions
+           in the surrounding prose carry the .figure-jump link instead
+           (rendering.py's _figure_mention_link) -- plan/05-b. #}
       {% endfor %}
     </div>
 
-    {% if content.figures %}
+    {% if content.figures or content.bibliography %}
     <aside class="figures-panel">
-      <h2>図表一覧</h2>
+      {% if content.figures %}
+      <h2>{{ t('figures_heading') }}</h2>
       {% for fig in content.figures %}
-      <figure id="{{ fig.figure_id }}" class="figure-card">
-        <a href="#top" class="figure-back">本文に戻る ↑</a>
+      <figure id="{{ fig.figure_id }}" class="figure-card panel-item">
         <img src="/papers/{{ paper_id }}/figures/{{ fig.image_path.split('/')[-1] }}" alt="{{ fig.label }}" loading="lazy" />
         <figcaption>{{ fig.caption or fig.label }}</figcaption>
       </figure>
       {% endfor %}
+      {% endif %}
+
+      {% if content.bibliography %}
+      <div class="bibliography-section">
+        <h2>{{ t('bibliography_heading') }}</h2>
+        <ul>
+          {% for entry in content.bibliography %}
+          {{ bib_entry(entry) }}
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
     </aside>
     {% endif %}
   </div>
+
+  {% if content.bibliography %}
+  <section class="bibliography-mobile">
+    <h2>{{ t('bibliography_heading') }}</h2>
+    <ul>
+      {% for entry in content.bibliography %}
+      {{ bib_entry(entry, in_panel=False) }}
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
 </article>
 
 <script type="application/json" id="glossary-data">{{ glossary_json | safe }}</script>
+<script type="application/json" id="figures-data">{{ figures_json | safe }}</script>
+<script type="application/json" id="annotations-data">{{ annotations_json | safe }}</script>
 <div id="glossary-popover" class="glossary-popover" hidden></div>
+
+<div id="figure-modal" class="figure-modal" hidden>
+  <div class="figure-modal-backdrop"></div>
+  <div class="figure-modal-content">
+    <button type="button" class="figure-modal-close" aria-label="{{ t('gp_close_aria') }}">×</button>
+    <img src="" alt="" />
+    <figcaption></figcaption>
+  </div>
+</div>
+
+<button type="button" id="annotation-add-btn" class="annotation-add-btn" hidden>{{ t('annotation_add_button') }}</button>
+
+<div id="annotation-popover" class="annotation-popover" hidden></div>
+<script type="application/json" id="i18n-data">{{ i18n_json | safe }}</script>
+
 <script src="/static/reader.js"></script>
 {% endblock %}

@@ -1,30 +1,52 @@
 """FastAPI app: history list + upload form + reading view.
 
 Single-user, localhost-only personal tool -- no auth, no multi-tenant
-concerns. Processing runs synchronously in the request handler: the
-default heuristic pipeline does no network/LLM calls and finishes in well
-under a second for a typical paper, so a background task queue would be
-needless complexity today. Revisit if GLOSSARY_STRATEGY=llm ever makes
-processing slow enough to want that.
+concerns. Processing runs in a background thread (plan/05-f): GROBID calls
+can take anywhere from seconds to minutes depending on PDF size, so
+submit_paper returns almost immediately (paper allocated, status
+"processing") and the reading-view route itself renders a small
+processing/status page until the background thread flips the paper to
+"done" (or "error"). See pipeline.py's module docstring for why a plain
+threading.Thread is used instead of FastAPI's BackgroundTasks.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import db, pipeline, rendering, storage
+from app import db, i18n, pipeline, rendering, storage
 
 _APP_DIR = Path(__file__).parent
+_LOCALE_COOKIE = "lang"
 
 app = FastAPI(title="daily-read")
 templates = Jinja2Templates(directory=str(_APP_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(_APP_DIR / "static")), name="static")
+
+
+def _locale_context(request: Request) -> tuple[str, dict]:
+    """Resolve the UI locale (plan/05-h): an explicit `?lang=` query param
+    wins and is persisted to a cookie for subsequent requests (most links
+    in the app don't carry `?lang=` themselves); otherwise the cookie is
+    used; otherwise Japanese."""
+    query_lang = request.query_params.get("lang")
+    locale = i18n.resolve_locale(query_lang or request.cookies.get(_LOCALE_COOKIE))
+    return locale, {"locale": locale, "t": i18n.translator(locale)}
+
+
+def _render(request: Request, template_name: str, context: dict) -> HTMLResponse:
+    locale, locale_ctx = _locale_context(request)
+    response = templates.TemplateResponse(request, template_name, {**context, **locale_ctx})
+    if request.query_params.get("lang"):
+        response.set_cookie(_LOCALE_COOKIE, locale, max_age=60 * 60 * 24 * 365)
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -34,7 +56,7 @@ def index(request: Request) -> HTMLResponse:
         papers = db.list_papers(conn)
     finally:
         conn.close()
-    return templates.TemplateResponse(request, "index.html", {"papers": papers})
+    return _render(request, "index.html", {"papers": papers})
 
 
 @app.post("/papers")
@@ -42,17 +64,16 @@ async def submit_paper(
     file: UploadFile | None = File(None),
     url: str | None = Form(None),
 ) -> RedirectResponse:
+    # Both start_*_processing calls return almost immediately (id
+    # allocated, a "processing" row inserted) -- the actual GROBID/parse
+    # work happens in a background thread. Failures during that work show
+    # up as status="error" on the processing page, not as an HTTP error
+    # here (plan/05-f).
     if file is not None and file.filename:
         pdf_bytes = await file.read()
-        try:
-            paper_id = pipeline.process_upload(file.filename, pdf_bytes)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"PDFの処理に失敗しました: {exc}") from exc
+        paper_id = pipeline.start_upload_processing(file.filename, pdf_bytes)
     elif url:
-        try:
-            paper_id = pipeline.process_url(url)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"URLの取得に失敗しました: {exc}") from exc
+        paper_id = pipeline.start_url_processing(url)
     else:
         raise HTTPException(status_code=400, detail="PDFファイルまたはURLのどちらかを指定してください。")
 
@@ -64,16 +85,45 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
     conn = db.get_connection()
     try:
         paper = db.get_paper(conn, paper_id)
+        known_term_keys = db.known_term_keys(conn)
     finally:
         conn.close()
     if paper is None:
         raise HTTPException(status_code=404, detail="論文が見つかりません")
 
-    content = json.loads(storage.content_json_path(paper_id).read_text(encoding="utf-8"))
-    rendered_units = rendering.render_units(content["units"], content["glossary"])
-    figures_by_id = {fig["figure_id"]: fig for fig in content["figures"]}
+    if paper["status"] != "done":
+        # Still processing, or failed -- content.json doesn't exist yet
+        # (or never will, for "error"). processing.js polls
+        # GET /papers/{id}/status and reloads this page once it flips to
+        # "done" (plan/05-f).
+        return _render(request, "processing.html", {"paper": paper, "paper_id": paper_id})
 
-    return templates.TemplateResponse(
+    content = json.loads(storage.content_json_path(paper_id).read_text(encoding="utf-8"))
+    content.setdefault("bibliography", [])  # absent in content.json written before plan/03-c
+    content["glossary"] = rendering.filter_known_terms(content["glossary"], known_term_keys)
+    rendered_units = rendering.render_units(content["units"], content["glossary"], content["bibliography"])
+    toc_entries = rendering.table_of_contents(rendered_units)
+    # "concordance" entries are frequent terms the paper never defines and
+    # no bundled dictionary covers either -- surface them as a pre-reading
+    # checklist instead of only reactively, inline (plan/04-c).
+    preread_terms = [e for e in content["glossary"] if e["source"] == "concordance"]
+
+    # Annotations live entirely in SQLite (plan/05-g), independent of
+    # content.json, so they're re-matched against whatever units currently
+    # exist on every read rather than being baked in at pipeline time.
+    conn = db.get_connection()
+    try:
+        annotations = db.list_annotations(conn, paper_id)
+    finally:
+        conn.close()
+    unit_matches, matched_ids = rendering.match_annotations(content["units"], annotations)
+    for annotation in annotations:
+        annotation["found"] = annotation["id"] in matched_ids
+    for unit_index, annotation_ids in unit_matches.items():
+        rendered_units[unit_index]["annotation_ids"] = annotation_ids
+
+    locale, _ = _locale_context(request)
+    return _render(
         request,
         "paper.html",
         {
@@ -81,10 +131,98 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
             "paper_id": paper_id,
             "content": content,
             "rendered_units": rendered_units,
-            "figures_by_id": figures_by_id,
             "glossary_json": rendering.glossary_json(content["glossary"]),
+            "figures_json": rendering.figures_json(content["figures"], paper_id),
+            "preread_terms": preread_terms,
+            "toc_entries": toc_entries,
+            "search_url": rendering.search_url,
+            "annotations": annotations,
+            "annotations_json": rendering.annotations_json(annotations),
+            "i18n_json": json.dumps(i18n.js_translations(locale), ensure_ascii=False),
         },
     )
+
+
+@app.get("/papers/{paper_id}/status")
+def paper_status(paper_id: str) -> dict:
+    """Polled by processing.js every ~2s (plan/05-f). elapsed_seconds is
+    computed from created_at, not tracked client-side, so reloading the
+    processing page mid-wait still shows the correct elapsed time instead
+    of resetting to 0."""
+    conn = db.get_connection()
+    try:
+        paper = db.get_paper(conn, paper_id)
+    finally:
+        conn.close()
+    if paper is None:
+        raise HTTPException(status_code=404, detail="論文が見つかりません")
+
+    if paper["status"] == "error":
+        return {"status": "error", "error_message": paper["error_message"]}
+    if paper["status"] == "done":
+        return {"status": "done"}
+
+    created_at = datetime.fromisoformat(paper["created_at"])
+    elapsed_seconds = max(0, int((datetime.now(timezone.utc) - created_at).total_seconds()))
+    return {"status": "processing", "elapsed_seconds": elapsed_seconds}
+
+
+@app.post("/papers/{paper_id}/annotations")
+def create_annotation(
+    paper_id: str,
+    quote: str = Body(..., embed=True),
+    prefix: str = Body("", embed=True),
+    suffix: str = Body("", embed=True),
+    note: str = Body(..., embed=True),
+) -> dict:
+    """Personal margin note anchored to a quoted substring (plan/05-g)."""
+    if not quote.strip() or not note.strip():
+        raise HTTPException(status_code=400, detail="quoteとnoteは必須です。")
+    conn = db.get_connection()
+    try:
+        if db.get_paper(conn, paper_id) is None:
+            raise HTTPException(status_code=404, detail="論文が見つかりません")
+        return db.create_annotation(conn, paper_id=paper_id, quote=quote, prefix=prefix, suffix=suffix, note=note)
+    finally:
+        conn.close()
+
+
+@app.put("/papers/{paper_id}/annotations/{annotation_id}")
+def edit_annotation(paper_id: str, annotation_id: int, note: str = Body(..., embed=True)) -> dict:
+    if not note.strip():
+        raise HTTPException(status_code=400, detail="noteは必須です。")
+    conn = db.get_connection()
+    try:
+        updated = db.update_annotation_note(conn, annotation_id, paper_id, note)
+    finally:
+        conn.close()
+    if updated is None:
+        raise HTTPException(status_code=404, detail="メモが見つかりません")
+    return updated
+
+
+@app.delete("/papers/{paper_id}/annotations/{annotation_id}")
+def remove_annotation(paper_id: str, annotation_id: int) -> dict:
+    conn = db.get_connection()
+    try:
+        deleted = db.delete_annotation(conn, annotation_id, paper_id)
+    finally:
+        conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="メモが見つかりません")
+    return {"status": "ok"}
+
+
+@app.post("/glossary/known-terms")
+def mark_known_term(term: str = Body(..., embed=True)) -> dict:
+    """Record that the reader already knows `term` (plan/04-b). Applies
+    immediately across every paper -- see rendering.filter_known_terms."""
+    conn = db.get_connection()
+    try:
+        db.mark_term_known(conn, term)
+    finally:
+        conn.close()
+    return {"status": "ok"}
 
 
 @app.get("/papers/{paper_id}/figures/{filename}")

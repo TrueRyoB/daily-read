@@ -21,6 +21,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from app.glossary.base import normalize_term_key
 from app.models import GlossaryEntry
 
 _DEFINITION_RE = re.compile(
@@ -51,6 +52,8 @@ _MAX_CONTEXT_SENTENCES = 3
 _MAX_ENTRIES = 30
 
 _DICTIONARY_PATH = Path(__file__).parent / "dictionaries" / "common_abbreviations.json"
+_COMMON_WORDS_PATH = Path(__file__).parent / "dictionaries" / "common_english_words.txt"
+_VENUE_NAMES_PATH = Path(__file__).parent / "dictionaries" / "academic_venue_names.txt"
 
 
 class HeuristicGlossaryExtractor:
@@ -59,13 +62,19 @@ class HeuristicGlossaryExtractor:
     def __init__(self) -> None:
         self._bundled_dictionary = _load_bundled_dictionary()
 
-    def extract(self, full_text: str) -> list[GlossaryEntry]:
+    def extract(self, full_text: str, known_names: list[str] | None = None) -> list[GlossaryEntry]:
+        """known_names (plan/05-c): the paper's own authors plus its
+        reference list's authors, already parsed by tei_parse.py. Frequent
+        candidates matching one of these are excluded -- e.g. "Ward" or
+        "Guo" showing up as an "undefined term" because a cited author's
+        surname happens to recur, rather than because it's real jargon."""
         sentences = _SENTENCE_SPLIT_RE.split(full_text)
         entries: list[GlossaryEntry] = []
         seen_keys: set[str] = set()
+        excluded_full_names, excluded_name_tokens = _build_name_exclusion_sets(known_names or [])
 
         for phrase, acronym in self._find_in_text_definitions(full_text):
-            key = acronym.upper()
+            key = normalize_term_key(acronym)
             if key in seen_keys:
                 continue
             seen_keys.add(key)
@@ -78,10 +87,11 @@ class HeuristicGlossaryExtractor:
                 )
             )
 
-        for term, count in self._frequent_candidates(full_text).items():
+        candidates = self._frequent_candidates(full_text, excluded_full_names, excluded_name_tokens)
+        for term, count in candidates.items():
             if count < _MIN_CONCORDANCE_FREQUENCY or len(entries) >= _MAX_ENTRIES:
                 continue
-            key, initials_key = term.upper(), _initials(term)
+            key, initials_key = normalize_term_key(term), normalize_term_key(_initials(term))
             if key in seen_keys or initials_key in seen_keys:
                 continue  # already covered by an in-text-defined acronym for this same term
             seen_keys.add(key)
@@ -107,17 +117,55 @@ class HeuristicGlossaryExtractor:
         return found
 
     @staticmethod
-    def _frequent_candidates(full_text: str) -> "Counter[str]":
+    def _frequent_candidates(
+        full_text: str, excluded_full_names: set[str], excluded_name_tokens: set[str]
+    ) -> "Counter[str]":
         counts: Counter[str] = Counter()
         for match in _CANDIDATE_RE.finditer(full_text):
             candidate = _strip_leading_common_words(match.group(0).strip())
             if not candidate:
                 continue
-            first_word = candidate.split()[0].lower()
+            words = candidate.split()
+            first_word = words[0].lower()
             if first_word in _STRUCTURAL_WORDS or candidate.lower() in _STRUCTURAL_WORDS:
+                continue
+            # Only single-word candidates are checked against the common-word
+            # list: a multi-word phrase built from ordinary words (e.g.
+            # "Random Forest", "Neural Network") is still legitimate domain
+            # jargon and must not be filtered just because its parts are
+            # common on their own.
+            if len(words) == 1 and first_word in _COMMON_ENGLISH_WORDS:
+                continue
+            # Publication venue/publisher names leak in from reference-list
+            # text that GROBID sometimes classifies as body content instead
+            # of back matter (plan/04-e) -- unlike common words, the whole
+            # candidate (not just single words) is checked, since a venue
+            # name is exactly the thing to block, not a component of a
+            # larger legitimate term.
+            if candidate.lower() in _ACADEMIC_VENUE_NAMES:
+                continue
+            # Proper nouns (plan/05-c): the paper's own authors and its
+            # reference list's authors are known in advance (already parsed
+            # elsewhere), so an exact full-name match, or a single-word
+            # candidate matching one name component (surname/forename), is
+            # excluded. This only catches names already known from this
+            # paper's own metadata -- not general proper-noun detection
+            # (that would need NER, a much heavier dependency).
+            if candidate.lower() in excluded_full_names:
+                continue
+            if len(words) == 1 and first_word in excluded_name_tokens:
                 continue
             counts[candidate] += 1
         return Counter(dict(counts.most_common()))  # most-frequent-first so _MAX_ENTRIES keeps the best
+
+
+def _build_name_exclusion_sets(known_names: list[str]) -> tuple[set[str], set[str]]:
+    """Split each known name (e.g. "Thomas Kipf") into a lowercase full-name
+    set (for matching a candidate like "Thomas Kipf") and a single-word
+    token set (for matching a bare surname like "Kipf") -- plan/05-c."""
+    full_names = {name.lower() for name in known_names if name}
+    tokens = {word.lower() for name in known_names for word in name.split()}
+    return full_names, tokens
 
 
 def _strip_leading_common_words(candidate: str) -> str | None:
@@ -144,4 +192,28 @@ def _load_bundled_dictionary() -> dict[str, str]:
     if not _DICTIONARY_PATH.exists():
         return {}
     with _DICTIONARY_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
+        raw = json.load(f)
+    # Keyed through normalize_term_key so lookups stay consistent with the
+    # normalized keys used everywhere else in extract() (the file itself
+    # still reads as a plain {"LSTM": "..."} mapping on disk).
+    return {normalize_term_key(k): v for k, v in raw.items()}
+
+
+def _load_wordlist(path: Path) -> frozenset[str]:
+    """Load a '# comment'-friendly, one-entry-per-line, lowercase-normalized
+    wordlist file. Shared by common_english_words.txt (04-a) and
+    academic_venue_names.txt (04-e)."""
+    if not path.exists():
+        return frozenset()
+    words = set()
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            words.add(line.lower())
+    return frozenset(words)
+
+
+_COMMON_ENGLISH_WORDS = _load_wordlist(_COMMON_WORDS_PATH)
+_ACADEMIC_VENUE_NAMES = _load_wordlist(_VENUE_NAMES_PATH)
