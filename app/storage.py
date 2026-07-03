@@ -4,6 +4,7 @@ data/
   daily-read.db            <- SQLite index (db.py): title, date, reading time
   papers/<id>/
     original.pdf
+    tei.xml                <- raw GROBID response, kept for debugging (plan/03-b)
     content.json           <- normalized units + glossary + figure metadata
     figures/<figure_id>.<ext>
 """
@@ -26,6 +27,10 @@ def figures_dir(paper_id: str) -> Path:
 
 def original_pdf_path(paper_id: str) -> Path:
     return paper_dir(paper_id) / "original.pdf"
+
+
+def tei_xml_path(paper_id: str) -> Path:
+    return paper_dir(paper_id) / "tei.xml"
 
 
 def content_json_path(paper_id: str) -> Path:

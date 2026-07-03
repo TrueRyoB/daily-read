@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hand-authored "golden" GROBID TEI fixture for cheap, offline pipeline
+  verification (no Docker/GROBID/network required).
+
+  BEST-EFFORT ACCURACY NOTICE: this file was authored from GROBID's public
+  documentation, one verified real <figure> output example, and general
+  TEI-P5 conventions, NOT captured from a live GROBID response, because
+  no GROBID instance is reachable in this environment. Once plan/02 (Docker
+  one-command startup) is implemented and a live GROBID is available,
+  spot-check this fixture against a real `processFulltextDocument` response
+  for a short real paper and correct any structural drift found. See
+  plan/03-pdf-domain-extraction-gaps.md ("生TEI保存") for the related
+  production-side plan to persist real TEI responses for debugging.
+
+  Deliberately exercises, in one small document, the structures needed by
+  plan/03 and plan/04:
+    - teiHeader: title, two authors, abstract              (03-a)
+    - a <figure> with head/label/figDesc/graphic+coords     (03-b)
+    - in-text <ref type="bibr"> citation markers            (03-c)
+    - back/listBibl bibliography, one entry with a DOI      (03-c)
+    - nested <div> with an unnumbered heading (tests level-  (03-d)
+      from-nesting-depth, not just numbering-text regex)
+-->
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader xml:lang="en">
+    <fileDesc>
+      <titleStmt>
+        <title level="a" type="main">Attention-Based Graph Neural Networks for Sparse Retrieval</title>
+      </titleStmt>
+      <publicationStmt>
+        <publisher/>
+      </publicationStmt>
+      <sourceDesc>
+        <biblStruct>
+          <analytic>
+            <author>
+              <persName><forename type="first">Ada</forename><surname>Nakamura</surname></persName>
+            </author>
+            <author>
+              <persName><forename type="first">Kenji</forename><surname>Ito</surname></persName>
+            </author>
+          </analytic>
+        </biblStruct>
+      </sourceDesc>
+    </fileDesc>
+    <profileDesc>
+      <abstract>
+        <p>We propose a graph neural network architecture for sparse retrieval that
+        combines message passing with attention pooling. Our method improves
+        recall over strong baselines while remaining efficient on CPU-only
+        hardware.</p>
+      </abstract>
+    </profileDesc>
+  </teiHeader>
+  <text xml:lang="en">
+    <body>
+      <div>
+        <head>1 Introduction</head>
+        <p>Graph Neural Network (GNN) models have become a standard tool for
+        learning over relational data <ref type="bibr" target="#b0">[1]</ref>.
+        Prior work has explored message passing schemes extensively
+        <ref type="bibr" target="#b1">[2]</ref>, but efficient sparse
+        retrieval remains challenging.</p>
+        <div>
+          <head>Related Work</head>
+          <p>Several approaches combine attention with graph structure
+          <ref type="bibr" target="#b0">[1]</ref>, though most assume dense
+          adjacency and do not scale to the sparse setting we target.</p>
+        </div>
+      </div>
+      <div>
+        <head>2 Method</head>
+        <p>Figure 1 illustrates the overall pipeline described below.</p>
+        <figure xml:id="fig_0">
+          <head>Figure 1 :</head>
+          <label>1</label>
+          <figDesc>Figure 1: Overview of the attention-pooled message passing pipeline.</figDesc>
+          <graphic coords="1,72.00,178.57,319.30,220.00" type="bitmap"/>
+        </figure>
+        <p>We first embed each node independently, then apply attention-weighted
+        message passing over the graph neighborhood.</p>
+      </div>
+    </body>
+    <back>
+      <div type="bibliography">
+        <listBibl>
+          <biblStruct xml:id="b0">
+            <analytic>
+              <title level="a" type="main">Semi-Supervised Classification with Graph Convolutional Networks</title>
+              <author>
+                <persName><forename type="first">Thomas</forename><surname>Kipf</surname></persName>
+              </author>
+            </analytic>
+            <monogr>
+              <imprint>
+                <date type="published" when="2017"/>
+              </imprint>
+            </monogr>
+            <idno type="DOI">10.48550/arXiv.1609.02907</idno>
+          </biblStruct>
+          <biblStruct xml:id="b1">
+            <analytic>
+              <title level="a" type="main">Neural Message Passing for Quantum Chemistry</title>
+              <author>
+                <persName><forename type="first">Justin</forename><surname>Gilmer</surname></persName>
+              </author>
+            </analytic>
+            <monogr>
+              <imprint>
+                <date type="published" when="2017"/>
+              </imprint>
+            </monogr>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>
