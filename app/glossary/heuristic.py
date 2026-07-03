@@ -89,6 +89,17 @@ _NER_EXCLUDE_LABELS = {"PERSON", "NORP", "FAC", "ORG", "GPE", "LOC"}
 # retrying (and failing) on every single paper.
 _nlp = "unloaded"
 
+# Per-word judgment cache (plan/07-troubleshooting-backlog.md follow-up):
+# a full spaCy pass over one paper's full_text measured ~0.5-1.3s, and
+# without this cache that cost was paid again on *every* paper even for
+# words ("Earth", a recurring author's surname not in known_names, etc.)
+# already judged before. Keyed by lowercase word -> True (excluded, judged
+# a proper noun) or False (checked, not one) so a "not a proper noun"
+# result is remembered too and never re-asked, not just positive hits.
+# Process-lifetime only (not persisted to disk): the model itself is
+# already only in-memory, and this is bounded by the same tradeoff.
+_ner_judgment_cache: dict[str, bool] = {}
+
 
 class HeuristicGlossaryExtractor:
     """Default GlossaryExtractor: pattern-based, no external calls, $0 cost."""
@@ -256,17 +267,44 @@ def _get_nlp():
     return _nlp
 
 
+def _collect_single_word_ner_candidates(full_text: str) -> set[str]:
+    """Cheap pre-scan (plain regex, no spaCy) for which single-word,
+    non-acronym-shaped words could possibly need a proper-noun judgment --
+    computed first so _build_ner_exclusion_tokens can tell whether a fresh
+    spaCy pass is even necessary, without running it just to find out."""
+    words: set[str] = set()
+    for match in _CANDIDATE_RE.finditer(full_text):
+        candidate = _strip_leading_common_words(match.group(0).strip())
+        if candidate and len(candidate.split()) == 1 and not candidate.isupper():
+            words.add(candidate.lower())
+    return words
+
+
 def _build_ner_exclusion_tokens(full_text: str) -> set[str]:
-    nlp = _get_nlp()
-    if nlp is None:
-        return set()
-    doc = nlp(full_text)
-    tokens: set[str] = set()
-    for ent in doc.ents:
-        if ent.label_ not in _NER_EXCLUDE_LABELS:
-            continue
-        tokens.update(word.lower() for word in ent.text.split())
-    return tokens
+    candidate_words = _collect_single_word_ner_candidates(full_text)
+    uncached = {w for w in candidate_words if w not in _ner_judgment_cache}
+
+    if uncached:
+        nlp = _get_nlp()
+        if nlp is None:
+            # Model unavailable: fail open (never excludes) rather than
+            # retrying every paper -- cache the negative result too.
+            for word in uncached:
+                _ner_judgment_cache[word] = False
+        else:
+            found_entities: set[str] = set()
+            for ent in nlp(full_text).ents:
+                if ent.label_ in _NER_EXCLUDE_LABELS:
+                    found_entities.update(w.lower() for w in ent.text.split())
+            for word in uncached:
+                _ner_judgment_cache[word] = word in found_entities
+            # Opportunistic: cache any other entity tokens this same pass
+            # happened to find too (free, since the pass already ran) --
+            # a later paper mentioning them then needs no pass of its own.
+            for word in found_entities:
+                _ner_judgment_cache.setdefault(word, True)
+
+    return {w for w in candidate_words if _ner_judgment_cache.get(w)}
 
 
 def _heading_contains_term(heading_texts: list[str], term: str) -> bool:

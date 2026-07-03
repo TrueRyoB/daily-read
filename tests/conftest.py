@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from app import db, storage
+from app.glossary import heuristic
 
 
 @pytest.fixture
@@ -22,3 +23,14 @@ def isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "PAPERS_DIR", papers_dir)
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "daily-read.db")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def reset_ner_judgment_cache():
+    """heuristic._ner_judgment_cache is process-lifetime global state by
+    design (plan/07-troubleshooting-backlog.md follow-up) -- reset it
+    around every test so one test's vocabulary can never leak a stale
+    proper-noun judgment into an unrelated test."""
+    heuristic._ner_judgment_cache.clear()
+    yield
+    heuristic._ner_judgment_cache.clear()
