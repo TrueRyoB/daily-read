@@ -28,14 +28,16 @@ concerns).
 from __future__ import annotations
 
 import json
+import logging
 import threading
+import time
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from app import db, storage
+from app import db, storage, version
 from app.glossary.factory import get_extractor
 from app.ingestion.source_resolver import ResolvedSource, resolve_upload, resolve_url
 from app.models import CITATION_PLACEHOLDER_RE, FIGURE_MENTION_PLACEHOLDER_RE, Figure, NormalizedDocument, PaperContent
@@ -43,6 +45,8 @@ from app.pdf.grobid_client import extract_tei
 from app.pdf.tei_parse import parse_tei
 
 _WORDS_PER_MINUTE = 200
+
+logger = logging.getLogger(__name__)
 
 
 def process_upload(filename: str, pdf_bytes: bytes) -> str:
@@ -117,6 +121,7 @@ def _process_in_background(paper_id: str, resolve: Callable[[], ResolvedSource])
     uncaught: nothing is watching this thread, so an uncaught exception
     here would leave the paper stuck at status="processing" forever with
     the UI spinning indefinitely instead of showing an error."""
+    started = time.perf_counter()
     try:
         resolved = resolve()
         title, word_count, est_minutes = _process_pdf(paper_id, resolved.pdf_bytes)
@@ -126,6 +131,15 @@ def _process_in_background(paper_id: str, resolve: Callable[[], ResolvedSource])
         finally:
             conn.close()
     except Exception as exc:
+        # plan/06-performance-investigation.md: elapsed time + commit here
+        # is what let us confirm, after the fact, that failures were real
+        # GROBID-side timeouts rather than a client-side hang -- logged at
+        # the outer level because _process_pdf's own per-stage timers below
+        # never get a chance to log if the failure happens mid-stage.
+        elapsed = time.perf_counter() - started
+        logger.error(
+            "paper %s failed after %.1fs (commit=%s): %s", paper_id, elapsed, version.VERSION_LABEL, exc
+        )
         conn = db.get_connection()
         try:
             db.mark_paper_error(conn, paper_id, str(exc))
@@ -137,14 +151,27 @@ def _process_pdf(paper_id: str, pdf_bytes: bytes) -> tuple[str, int, int]:
     """The actual GROBID/parse/glossary/persist work for an
     already-allocated paper_id. Deliberately does not touch the `papers`
     table itself -- returns (title, word_count, est_minutes) for the
-    caller to persist however fits its flow (INSERT vs UPDATE)."""
+    caller to persist however fits its flow (INSERT vs UPDATE).
+
+    Per-stage timings are logged (plan/06-performance-investigation.md):
+    investigating a real timeout previously required cross-referencing
+    file mtimes and DB rows after the fact -- this makes the breakdown
+    (GROBID call vs. local parsing vs. glossary extraction) available
+    directly in the logs, tagged with the commit that produced them.
+    """
     pdf_path = storage.original_pdf_path(paper_id)
     pdf_path.write_bytes(pdf_bytes)
 
+    started = time.perf_counter()
+    t0 = time.perf_counter()
     tei_xml = extract_tei(str(pdf_path))
+    grobid_seconds = time.perf_counter() - t0
     storage.tei_xml_path(paper_id).write_text(tei_xml, encoding="utf-8")
+
+    t0 = time.perf_counter()
     normalized = parse_tei(tei_xml, str(pdf_path))
     _write_figures(paper_id, normalized.figures)
+    parse_seconds = time.perf_counter() - t0
 
     # Joined with ". " (not just " "): a plain space would let a heading's
     # trailing word glue onto the next paragraph's opening acronym
@@ -165,7 +192,9 @@ def _process_pdf(paper_id: str, pdf_bytes: bytes) -> tuple[str, int, int]:
         _strip_placeholders(u.text) for u in normalized.units if u.kind in ("heading", "paragraph")
     )
     known_names = list(normalized.authors) + [name for entry in normalized.bibliography for name in entry.authors]
+    t0 = time.perf_counter()
     glossary = get_extractor().extract(full_text, known_names)
+    glossary_seconds = time.perf_counter() - t0
 
     title = normalized.title or _guess_title(normalized)
     word_count = len(full_text.split())
@@ -184,6 +213,21 @@ def _process_pdf(paper_id: str, pdf_bytes: bytes) -> tuple[str, int, int]:
     )
     storage.content_json_path(paper_id).write_text(
         json.dumps(_content_to_json(content), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    logger.info(
+        "paper %s processed in %.1fs (commit=%s) pdf_bytes=%d grobid=%.1fs parse=%.2fs glossary=%.2fs "
+        "figures=%d bibliography=%d words=%d",
+        paper_id,
+        time.perf_counter() - started,
+        version.VERSION_LABEL,
+        len(pdf_bytes),
+        grobid_seconds,
+        parse_seconds,
+        glossary_seconds,
+        len(normalized.figures),
+        len(normalized.bibliography),
+        word_count,
     )
 
     return title, word_count, est_minutes

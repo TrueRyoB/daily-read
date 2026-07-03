@@ -13,6 +13,7 @@ threading.Thread is used instead of FastAPI's BackgroundTasks.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,10 +22,14 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import db, i18n, pipeline, rendering, storage
+from app import db, i18n, pipeline, rendering, storage, version
 
 _APP_DIR = Path(__file__).parent
 _LOCALE_COOKIE = "lang"
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+logger.info("daily-read starting at commit %s", version.VERSION_LABEL)
 
 app = FastAPI(title="daily-read")
 templates = Jinja2Templates(directory=str(_APP_DIR / "templates"))

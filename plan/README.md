@@ -94,6 +94,7 @@
 | 03 | [03-pdf-domain-extraction-gaps.md](03-pdf-domain-extraction-gaps.md) | PDF/TEIパースが論文のドメイン知識を活かせていない（タイトル/著者/要旨・図表ペアリング・引用リンク・目次・見出し階層・文字化け疑い） | 実装完了（03-b/03-fは一部要ライブGROBID再検証） |
 | 04 | [04-glossary-quality-and-user-vocabulary.md](04-glossary-quality-and-user-vocabulary.md) | 頻出語彙抽出の質が低い（一般英単語・参考文献ノイズ混入・単複重複）＋利用者ごとの既知語彙を永続的にopt-outする仕組みが無い | 実装完了 |
 | 05 | [05-user-feedback-round2.md](05-user-feedback-round2.md) | 実際にDockerで使用後のフィードバック（引用リンク不具合・図表文中参照・語彙フィルタ改善・検索文脈化・30分表現削除・非同期進捗表示・注釈機能・日英切替） | 実装完了（05-a〜05-h、05-iは提案のみ） |
+| 06 | [06-performance-investigation.md](06-performance-investigation.md) | 300KB程度のPDFでもGROBID呼び出しがTLEする。定量計測・MECE工程分解・ボトルネック特定・対応 | 実装完了（consolidation無効化＋所要時間ログ／コミットID付与。ライブDocker環境での効果確認は未実施） |
 
 ## 共通点（横断観察）
 

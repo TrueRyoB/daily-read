@@ -13,8 +13,18 @@ services:
       - "8000:8000"
     environment:
       GROBID_URL: http://grobid:8070
+      # Skips external CrossRef/biblio-glutton lookups per header/reference
+      # (app/pdf/grobid_client.py) -- these scale with bibliography size and
+      # network latency, not PDF size, and were the confirmed cause of GROBID
+      # requests occasionally exceeding the 180s timeout even for small PDFs.
+      GROBID_CONSOLIDATE: "0"
     volumes:
       - ./app:/app/app
       - ./data:/app/data
+      # Read-only: lets app/version.py resolve the current commit/dirty
+      # state for log correlation (plan/06-performance-investigation.md).
+      # The whole repo, not just .git, so `git status` sees real file
+      # state instead of reporting everything as deleted.
+      - .:/repo:ro
     depends_on:
       - grobid

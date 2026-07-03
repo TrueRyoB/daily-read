@@ -40,7 +40,7 @@ docker compose down
 
 GROBIDを別ホスト/ポートで動かす場合は環境変数 `GROBID_URL`（デフォルト `http://grobid:8070`、`docker-compose.yml`で設定済み）で向き先を変更できます。
 
-デフォルトでは、タイトル・著者・参考文献の精度を上げるため、GROBIDにCrossRef/biblio-glutton経由の外部照合（consolidation）を有効化してリクエストします。GROBIDコンテナに外向きの通信ができない環境や、処理を高速化したい場合は環境変数 `GROBID_CONSOLIDATE=0` で無効化できます（完全ローカルの抽出のみになります。`docker-compose.yml`の`app.environment`に追加してください）。
+GROBIDへのリクエストはデフォルトで `GROBID_CONSOLIDATE=0`（`docker-compose.yml`で設定済み）、つまりCrossRef/biblio-glutton経由の外部照合（consolidation）を無効化した、完全ローカルの抽出です。これは意図的な選択です: 外部API照合を有効にすると所要時間がPDFのサイズではなく参考文献の件数・外部APIの応答速度に依存するようになり、小さい論文でもGROBIDの180秒タイムアウトに達することが実際に確認されたため（`app/pdf/grobid_client.py`参照）。タイトル表記ゆれの補正や引用リンクのDOI自動補完の精度を優先したい場合は、環境変数 `GROBID_CONSOLIDATE=1` で有効化できます（`docker-compose.yml`の`app.environment`を書き換えてください。処理時間が伸び、GROBIDコンテナに外向きの通信が必要になります）。
 
 読書ビューの「読む前に確認」欄にある「調べる」リンクは、デフォルトでGoogle検索を開きます。他の検索エンジンを使いたい場合は環境変数 `SEARCH_ENGINE_URL_TEMPLATE`（`{query}`をクエリ文字列の差し込み位置として含む必要があります。例: `https://duckduckgo.com/?q={query}`）で変更できます。ページのリンクからブラウザの既定検索エンジンを呼び出す標準的な方法は存在しないため、この環境変数での明示指定という形にしています。
 
