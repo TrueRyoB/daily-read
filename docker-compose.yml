@@ -1,0 +1,20 @@
+services:
+  grobid:
+    image: grobid/grobid:0.9.0-crf
+    init: true
+    ports:
+      - "8070:8070"
+    ulimits:
+      core: 0
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      GROBID_URL: http://grobid:8070
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    depends_on:
+      - grobid
