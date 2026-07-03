@@ -1,0 +1,51 @@
+# Publication venues / publishers / preprint servers that sometimes leak
+# into glossary candidates from a paper's reference list (plan/04-e).
+# One name per line, matched case-insensitively against the whole candidate
+# (not just single words -- unlike common_english_words.txt, a venue name
+# IS the thing to block, not a component of a larger legitimate term).
+IEEE
+ACM
+CoRR
+arXiv
+Springer
+Elsevier
+Wiley
+Nature
+Science
+PNAS
+PLOS
+ICML
+NeurIPS
+NIPS
+CVPR
+ICCV
+ECCV
+AAAI
+ACL
+EMNLP
+NAACL
+KDD
+SIGKDD
+WWW
+VLDB
+SIGMOD
+STOC
+FOCS
+SODA
+ICLR
+UAI
+COLT
+JMLR
+TPAMI
+TACL
+ICASSP
+INTERSPEECH
+SIGGRAPH
+IJCAI
+AISTATS
+WACV
+BMVC
+ICRA
+IROS
+RSS
+Proceedings
