@@ -111,6 +111,22 @@
           {% else %}<h4 id="{{ unit.anchor_id }}">{{ unit.html | safe }}</h4>{% endif %}
         {% elif unit.kind == "paragraph" %}
           <p>{{ unit.html | safe }}</p>
+        {% elif unit.kind == "figure_fallback" %}
+        {# plan/07-troubleshooting-backlog.md#b-11: a diagram GROBID failed
+           to recognize as a real figure, surfaced as its raw, un-prosified
+           text fragments instead of being silently dropped or (as before
+           this fix) breaking the section structure by masquerading as
+           headings. Deliberately NOT styled like the reader's own
+           annotation-quote panel -- a different concept entirely (system-
+           flagged extraction wreckage, not a reader-selected passage). #}
+        <aside class="figure-fallback">
+          <p class="figure-fallback-hint">{{ t('figure_fallback_hint') }}</p>
+          <ul class="figure-fallback-list">
+            {% for line in unit.html_lines %}
+            <li>{{ line | safe }}</li>
+            {% endfor %}
+          </ul>
+        </aside>
         {% endif %}
         {# figure_ref units render nothing now: inline "Figure N" mentions
            in the surrounding prose carry the .figure-jump link instead

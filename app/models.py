@@ -68,8 +68,16 @@ class Figure:
 class ContentUnit:
     """One item in the normalized, single-column reading-order stream."""
 
-    kind: str  # "heading" | "paragraph" | "figure_ref"
+    kind: str  # "heading" | "paragraph" | "figure_ref" | "figure_fallback"
     text: str = ""
+    """For kind == "figure_fallback" (plan/07-troubleshooting-
+    backlog.md#b-11): newline-joined text fragments GROBID mis-segmented
+    out of a figure it failed to recognize as one block (e.g. a diagram's
+    individual text-box labels), one original fragment per line. Kept
+    entirely separate from "heading"/"paragraph" so it never enters the
+    table of contents or reads as the paper's own prose; rendered as a
+    clearly-flagged, un-prosified fragment list instead of either being
+    silently dropped or breaking the surrounding section structure."""
     level: int = 0  # heading level, 0 for non-headings
     figure_id: str | None = None  # set when kind == "figure_ref"
 

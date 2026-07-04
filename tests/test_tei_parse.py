@@ -55,7 +55,7 @@ def test_line_break_does_not_glue_words_together(tmp_path):
     assert normalized.units[0].text == "wordone wordtwo"
 
 
-def test_stray_diagram_label_heads_are_dropped(tmp_path):
+def test_stray_diagram_label_heads_are_not_treated_as_headings(tmp_path):
     # plan/07-troubleshooting-backlog.md: a real processed paper's Figure 2
     # pipeline diagram (flowchart-style, Mermaid-like box labels) surfaced
     # "Offline training"/"Deploy"/"Live experiment"/"Model" as four
@@ -80,6 +80,55 @@ def test_stray_diagram_label_heads_are_dropped(tmp_path):
     paragraphs = [u.text for u in normalized.units if u.kind == "paragraph"]
     assert "Fig 2: DAD pipeline diagram." in paragraphs
     assert "intro text" in paragraphs
+
+
+def test_stray_diagram_label_run_is_surfaced_as_a_figure_fallback_unit(tmp_path):
+    # plan/07-troubleshooting-backlog.md#b-11: rather than silently
+    # dropping the detected run, it's surfaced as its own unit (raw,
+    # un-prosified fragments) instead of either vanishing entirely or
+    # masquerading as headings that break the section structure.
+    tei = _wrap_body(
+        """
+        <div><head n="4.1">Deep Adaptive Design</head><p>intro text</p></div>
+        <div><head>Offline training</head></div>
+        <div><head>Deploy</head></div>
+        <div><head>Live experiment</head></div>
+        <div><head>Model</head><p>Fig 2: DAD pipeline diagram.</p></div>
+        <div><head n="4.2">Learning Policies</head><p>next section</p></div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    fallback_units = [u for u in normalized.units if u.kind == "figure_fallback"]
+    assert len(fallback_units) == 1
+    assert fallback_units[0].text == "Offline training\nDeploy\nLive experiment\nModel"
+
+    # it sits in reading order right where the stray run occurred -- after
+    # "intro text", before "Fig 2: DAD pipeline diagram."
+    kinds_in_order = [(u.kind, u.text) for u in normalized.units]
+    intro_idx = kinds_in_order.index(("paragraph", "intro text"))
+    fig2_idx = kinds_in_order.index(("paragraph", "Fig 2: DAD pipeline diagram."))
+    fallback_idx = next(i for i, (k, _) in enumerate(kinds_in_order) if k == "figure_fallback")
+    assert intro_idx < fallback_idx < fig2_idx
+
+    # never pollutes the table of contents
+    assert all(u.kind != "heading" for u in fallback_units)
+
+
+def test_figure_fallback_flushed_at_end_of_document(tmp_path):
+    # A stray run that runs all the way to the end of the body (no
+    # trailing paragraph/heading to trigger the flush) must still surface,
+    # not get silently lost.
+    tei = _wrap_body(
+        """
+        <div><head n="1">Intro</head><p>text</p></div>
+        <div><head>Offline training</head></div>
+        <div><head>Deploy</head></div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    fallback_units = [u for u in normalized.units if u.kind == "figure_fallback"]
+    assert len(fallback_units) == 1
+    assert fallback_units[0].text == "Offline training\nDeploy"
 
 
 def test_unnumbered_heading_with_its_own_paragraph_is_kept(tmp_path):

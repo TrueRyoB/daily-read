@@ -628,6 +628,33 @@ main {
   max-width: var(--max-measure);
 }
 
+/* plan/07-troubleshooting-backlog.md#b-11: deliberately distinct from
+   .reader-abstract's solid accent border and from the annotation-
+   highlight panel's styling -- this is neither the paper's own prose nor
+   a reader-selected quote, it's flagged extraction wreckage. A dashed
+   border keeps that "uncertain/raw" signal visible at a glance. */
+.figure-fallback {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  max-width: var(--max-measure);
+}
+
+.figure-fallback-hint {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.figure-fallback-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
 .toc {
   margin: 1.5rem 0;
   padding: 0.75rem 1.25rem;

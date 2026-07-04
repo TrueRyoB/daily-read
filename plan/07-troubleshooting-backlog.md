@@ -382,7 +382,7 @@ life]」）にその場でトグル表示する、という工夫を求めてい
 | B-8 | 長い論文の分割parse高速化 | 大 | 未着手 |
 | B-9 | カレンダーのindex.html埋め込み・日付デフォルト・論文検索 | 中 | 実装完了 |
 | B-10 | 論文の削除機能（ストレージ解放） | 中 | 実装完了 |
-| B-11 | GROBID誤認識による図表（Mermaid風ダイアグラム）のレイアウト崩れ | 中 | ルールベース除外を実装完了。座標ベースのpixel化は設計のみ・未着手 |
+| B-11 | GROBID誤認識による図表（Mermaid風ダイアグラム）のレイアウト崩れ | 中 | 実装完了（検出済み断片をfigure_fallbackとして可視化）。座標ベースのpixel化は設計のみ・未着手 |
 
 #### B-1: 07-c 語彙抽出の誤検出（固有名詞・複数形）（小）【実装完了】
 
@@ -1185,6 +1185,61 @@ GROBID自身が付与する`n="..."`という節番号属性を持っていた**
   ケースもあり得るため、読書ビュー上に「一部の図が抽出できていない
   可能性があります」等の軽量な指標を出すべきかは別途判断が必要
   （実装するかは未定、ログのみで十分という判断もあり得る）。
+
+**フォローアップ: 検出済みの断片を完全に捨てず可視化する【実装完了】**:
+GROBIDの限界（DeLFTモデルへの切り替えも根本解決にはならないことを
+WebSearchで裏付けを取った上で確認済み——GROBID自身のissue #438で
+「figures/tables/formulasの抽出品質は悪い」と認められている既知の
+弱点）を受け、ユーザーから「画像と思われるものは、文体が崩れていても
+構わないので、（読者の解釈負担を許容してでも）その正体が分かる形で
+可視化できないか。ただし本文の文体・構造を壊すのは避けてほしい」との
+提案があった。
+
+- **設計判断**: 読者自身が本文から選ぶ「引用」（`.annotation-highlight`、
+  `>`記法のコメント機能）とは意図的に区別した、別のCSSクラス・別の
+  説明文言を持つ専用のブロックとして実装した——「読者が選んだ引用」と
+  「システムが機械的に検出した抽出失敗の残骸」を同じ語彙・同じ見た目で
+  混同させないため。
+- **実装内容**:
+  - `app/models.py`: `ContentUnit`に新しい`kind`値`"figure_fallback"`を
+    追加（`"heading"`/`"paragraph"`/`"figure_ref"`と並ぶ第4の種別）。
+    `text`は検出された各断片を改行区切りで連結したもの。
+  - `app/pdf/tei_parse.py`: `_is_stray_diagram_label`の連続ランを検出
+    した際、従来の`continue`（完全破棄）をやめ、`stray_fragment_buffer`に
+    断片テキストを蓄積。ランが終了した時点（段落・実見出し・図表が
+    現れた時点、またはbody末尾に達した時点）で`_flush_stray_fragments`が
+    1つの`figure_fallback`ユニットとしてフラッシュし、**そのランが
+    あった位置にそのまま挿入**する（前後の文脈を保つため）。
+  - `app/rendering.py`: `render_units`に`figure_fallback`用の分岐を追加。
+    改行で分割した断片1件ずつを独立に`annotate()`に通し（`html_lines`
+    リストとして保持）、それぞれ個別にglossary用語リンク・HTMLエスケープ
+    が適用される（ただし`match_annotations`は元々`heading`/`paragraph`
+    種別のユニットしか対象にしないため、この種別にはマーク＝ハイライトは
+    絶対に付与されない——設計上安全）。`table_of_contents`は`heading`
+    種別のみを見るため、目次への混入は起きない。
+  - `app/templates/paper.html`: `figure_fallback`を`<aside
+    class="figure-fallback">`として、説明文言＋箇条書き（`<ul>`、断片
+    1件＝1項目）でレンダリング。
+  - `app/i18n.py`: `figure_fallback_hint`（「⚠ 図として認識できなかった
+    内容です（原文ママ・順序は保証されません）」）をja/en両方に追加。
+  - `app/static/styles.css`: `.figure-fallback`（破線ボーダー、
+    `.reader-abstract`の実線アクセントボーダーや`.annotation-highlight`
+    とは意図的に異なる見た目——「これは著者の本文でも読者の引用でもない」
+    ことを一目で示すため）。
+- **実データでの検証**: `ae3b47920919`（実際に処理された同一論文）を
+  再度読み込ませ、"Offline training"/"Deploy"/"Live experiment"/"Model"の
+  4断片が改行連結された1つの`figure_fallback`ユニットとして、
+  "Deep Adaptive Design"見出しと"Learning Policies"見出しの間（元の
+  位置）に正しく挿入されることを確認済み。実際にHTTPルート経由で
+  レンダリングし、`class="figure-fallback"`・断片テキスト・`<li>`要素と
+  しての出力を確認済み。
+- `tests/test_tei_parse.py`に新規2件（断片が`figure_fallback`ユニットとして
+  正しい位置に挿入されること／body末尾でランが終わる場合もフラッシュ
+  されること）、新規`tests/test_figure_fallback_rendering.py`に4件
+  （断片ごとのHTML分割・目次に混入しないこと・glossary用語リンクが
+  断片内でも機能すること・HTMLエスケープ）、`tests/test_paper_view_route.py`
+  に1件（実際のHTTPレスポンスで見出しとして出現しないこと）を追加。
+  `pytest tests/`225件全件パス。
 
 ---
 

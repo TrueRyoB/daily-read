@@ -72,6 +72,17 @@ def render_units(
         if unit["kind"] == "figure_ref":
             rendered.append(unit)
             continue
+        if unit["kind"] == "figure_fallback":
+            # Each newline-joined fragment (plan/07-troubleshooting-
+            # backlog.md#b-11) is annotated on its own, not as one blob --
+            # these are independent diagram-label fragments, not
+            # continuous prose, and match_annotations never assigns marks
+            # to a "figure_fallback" unit anyway (only "heading"/
+            # "paragraph" are matchable), so there's nothing lost by
+            # skipping the mark-range plumbing here.
+            lines = [line for line in unit["text"].split("\n") if line]
+            rendered.append({**unit, "html_lines": [annotate(line, []) for line in lines]})
+            continue
         html_out = annotate(unit["text"], mark_ranges.get(i, []))
         if unit["kind"] == "heading":
             heading_count += 1

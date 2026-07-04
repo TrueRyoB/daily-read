@@ -74,9 +74,23 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
                     if grobid_id:
                         grobid_id_to_figure_id[grobid_id] = figure.figure_id
 
+    def _flush_stray_fragments(buffer: list[str]) -> None:
+        # plan/07-troubleshooting-backlog.md#b-11: rather than silently
+        # dropping a detected diagram-label run, surface it as its own
+        # unit -- readers can bear the interpretive cost of a raw, un-
+        # prosified fragment list, but not a spurious heading breaking the
+        # section structure. Kept out of the heading/paragraph flow
+        # entirely (its own `kind`) so it never pollutes the table of
+        # contents or reads as if the paper's own author wrote it.
+        if buffer:
+            units.append(ContentUnit(kind="figure_fallback", text="\n".join(buffer)))
+            buffer.clear()
+
     in_stray_diagram_run = False
+    stray_fragment_buffer: list[str] = []
     for idx, (depth, item, has_paragraph_sibling) in enumerate(clustered):
         if isinstance(item, list):
+            _flush_stray_fragments(stray_fragment_buffer)
             in_stray_diagram_run = False
             figure = built_figures[idx]
             if figure is not None:
@@ -100,16 +114,23 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
             # item processed on its own next.
             if _is_stray_diagram_label(item, has_paragraph_sibling) or (in_stray_diagram_run and not item.get("n")):
                 in_stray_diagram_run = True
+                text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
+                if text:
+                    stray_fragment_buffer.append(text)
                 continue
+            _flush_stray_fragments(stray_fragment_buffer)
             in_stray_diagram_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
             if text:
                 units.append(ContentUnit(kind="heading", text=text, level=_infer_level(text, depth)))
         elif tag == "p":
+            _flush_stray_fragments(stray_fragment_buffer)
             in_stray_diagram_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
             if text:
                 units.append(ContentUnit(kind="paragraph", text=text))
+
+    _flush_stray_fragments(stray_fragment_buffer)
 
     return NormalizedDocument(
         units=units,

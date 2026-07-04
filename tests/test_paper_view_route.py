@@ -329,6 +329,39 @@ def test_service_worker_served_from_root_scope(isolated_data_dir):
     assert "current-offline-paper" in response.text
 
 
+_STRAY_DIAGRAM_LABEL_TEI = f"""<?xml version="1.0"?>
+<TEI xmlns="{_TEI_NS}">
+  <text><body>
+    <div><head n="1">Introduction</head><p>Some intro text.</p></div>
+    <div><head>Offline training</head></div>
+    <div><head>Deploy</head></div>
+    <div><head>Model</head><p>Fig 2 caption text.</p></div>
+    <div><head n="2">Next Section</head><p>More text.</p></div>
+  </body></text>
+</TEI>
+"""
+
+
+def test_stray_diagram_labels_render_as_flagged_fallback_not_headings(isolated_data_dir, tmp_path, monkeypatch):
+    # plan/07-troubleshooting-backlog.md#b-11: end-to-end check that a
+    # detected diagram-label run reaches the actual rendered page as a
+    # flagged fragment list, not as spurious headings breaking the TOC/
+    # section structure.
+    monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: _STRAY_DIAGRAM_LABEL_TEI)
+    pdf_path = blank_pdf(tmp_path, pages=1)
+    paper_id = pipeline.process_upload("sample.pdf", open(pdf_path, "rb").read())
+
+    html = TestClient(app).get(f"/papers/{paper_id}").text
+    assert 'class="figure-fallback"' in html
+    assert "Offline training" in html
+    assert "Deploy" in html
+    # never shows up as a real heading anywhere
+    import re
+
+    heading_texts = re.findall(r"<h[234][^>]*>(.*?)</h[234]>", html, re.DOTALL)
+    assert not any("Offline training" in h or "Deploy" in h for h in heading_texts)
+
+
 def test_marking_known_from_preread_section_uses_same_store_as_popover(isolated_data_dir, tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: _UNDEFINED_FREQUENT_TERM_TEI)
     client = TestClient(app)
