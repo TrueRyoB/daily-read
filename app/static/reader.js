@@ -552,3 +552,94 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
       // hidden.
     });
 })();
+
+// Related papers (OpenAlex, opt-in) -- plan/07-troubleshooting-backlog.md#b-7.
+// The button POSTs to kick off a background job, then this polls for the
+// result. On load it also checks the status once in case a previous visit
+// already started (or finished) the job, so returning to the page doesn't
+// lose the result or require clicking the button again.
+(function () {
+  const section = document.querySelector('[data-role="related-papers"]');
+  if (!section) return;
+
+  const paperId = section.dataset.paperId;
+  const button = section.querySelector('[data-role="related-papers-button"]');
+  const statusEl = section.querySelector('[data-role="related-papers-status"]');
+  const listEl = section.querySelector('[data-role="related-papers-list"]');
+  const pollIntervalMs = 3000;
+
+  function renderResults(results) {
+    listEl.innerHTML = "";
+    if (!results.length) {
+      statusEl.hidden = false;
+      statusEl.textContent = I18N.related_papers_empty;
+      return;
+    }
+    statusEl.hidden = true;
+    for (const item of results) {
+      const li = document.createElement("li");
+      li.className = "related-paper-item";
+      const titleEl = document.createElement("span");
+      titleEl.className = "related-paper-title";
+      if (item.url) {
+        const link = document.createElement("a");
+        link.href = item.url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = item.title;
+        titleEl.appendChild(link);
+      } else {
+        titleEl.textContent = item.title;
+      }
+      const metaEl = document.createElement("span");
+      metaEl.className = "related-paper-meta";
+      const authors = item.authors && item.authors.length ? item.authors.join(", ") : "";
+      const year = item.year || I18N.related_papers_unknown_year;
+      const citation = I18N.related_papers_citation_count.replace("{count}", item.citation_count);
+      metaEl.textContent = [authors, year, citation].filter(Boolean).join(" · ");
+      li.appendChild(titleEl);
+      li.appendChild(metaEl);
+      listEl.appendChild(li);
+    }
+  }
+
+  function poll() {
+    fetch(`/papers/${paperId}/related-papers`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "processing") {
+          statusEl.hidden = false;
+          statusEl.textContent = I18N.related_papers_loading;
+          setTimeout(poll, pollIntervalMs);
+          return;
+        }
+        if (data.status === "done") {
+          renderResults(data.results || []);
+          return;
+        }
+        if (data.status === "error") {
+          statusEl.hidden = false;
+          statusEl.textContent = I18N.related_papers_error;
+          return;
+        }
+        // "not_started": show the button, nothing to poll yet.
+        button.hidden = false;
+      })
+      .catch(() => {
+        setTimeout(poll, pollIntervalMs);
+      });
+  }
+
+  button.addEventListener("click", () => {
+    button.hidden = true;
+    statusEl.hidden = false;
+    statusEl.textContent = I18N.related_papers_loading;
+    fetch(`/papers/${paperId}/related-papers`, { method: "POST" })
+      .then(() => setTimeout(poll, pollIntervalMs))
+      .catch(() => {
+        statusEl.textContent = I18N.related_papers_error;
+      });
+  });
+
+  poll();
+})();

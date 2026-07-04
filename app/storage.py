@@ -35,3 +35,12 @@ def tei_xml_path(paper_id: str) -> Path:
 
 def content_json_path(paper_id: str) -> Path:
     return paper_dir(paper_id) / "content.json"
+
+
+def related_papers_json_path(paper_id: str) -> Path:
+    """plan/07-troubleshooting-backlog.md#b-7: opt-in, so most papers never
+    have this file. Holds job status ("processing"/"done"/"error") plus the
+    scored candidate list once done -- a plain file rather than a DB table,
+    consistent with this app's existing split (SQLite = index, files = the
+    actual per-paper content)."""
+    return paper_dir(paper_id) / "related_papers.json"

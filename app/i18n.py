@@ -78,6 +78,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "interpretation_day_modal_close": "閉じる",
         "interpretation_no_papers": "関連論文なし",
         "offline_ready_indicator": "📶 オフラインで閲覧可能",
+        "related_papers_heading": "関連論文",
+        "related_papers_button": "関連論文を探す",
+        "related_papers_loading": "OpenAlexで関連論文を検索しています…（時間がかかる場合があります）",
+        "related_papers_error": "関連論文の取得に失敗しました。",
+        "related_papers_empty": "関連論文が見つかりませんでした。",
+        "related_papers_citation_count": "被引用数: {count}",
+        "related_papers_unknown_year": "年不明",
     },
     "en": {
         "tagline": "Make papers easier to read",
@@ -147,6 +154,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "interpretation_day_modal_close": "Close",
         "interpretation_no_papers": "No related papers",
         "offline_ready_indicator": "📶 Available offline",
+        "related_papers_heading": "Related papers",
+        "related_papers_button": "Find related papers",
+        "related_papers_loading": "Searching OpenAlex for related papers… (this can take a while)",
+        "related_papers_error": "Couldn't fetch related papers.",
+        "related_papers_empty": "No related papers found.",
+        "related_papers_citation_count": "Cited by {count}",
+        "related_papers_unknown_year": "Unknown year",
     },
 }
 
@@ -169,6 +183,12 @@ JS_KEYS = (
     "annotation_jump",
     "annotation_not_found",
     "annotation_add_button",
+    "related_papers_button",
+    "related_papers_loading",
+    "related_papers_error",
+    "related_papers_empty",
+    "related_papers_citation_count",
+    "related_papers_unknown_year",
 )
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import calendar as _calendar_module
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import db, i18n, pipeline, rendering, storage, version
+from app import db, i18n, pipeline, related_papers, rendering, storage, version
 
 _APP_DIR = Path(__file__).parent
 _LOCALE_COOKIE = "lang"
@@ -332,3 +333,41 @@ def paper_figure(paper_id: str, filename: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="図が見つかりません")
     return FileResponse(path)
+
+
+@app.post("/papers/{paper_id}/related-papers")
+def start_related_papers(paper_id: str) -> dict:
+    """Opt-in trigger (plan/07-troubleshooting-backlog.md#b-7): the reader
+    presses a button, this kicks off a background OpenAlex lookup, and the
+    client polls GET .../related-papers for the result. A no-op (just
+    returns the existing status) if a job already ran or is running --
+    pressing the button twice shouldn't fire two overlapping OpenAlex
+    lookups for the same paper."""
+    conn = db.get_connection()
+    try:
+        paper = db.get_paper(conn, paper_id)
+    finally:
+        conn.close()
+    if paper is None:
+        raise HTTPException(status_code=404, detail="論文が見つかりません")
+
+    path = storage.related_papers_json_path(paper_id)
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    content = json.loads(storage.content_json_path(paper_id).read_text(encoding="utf-8"))
+    path.write_text(json.dumps({"status": "processing"}), encoding="utf-8")
+    threading.Thread(
+        target=related_papers.run_and_store,
+        args=(paper_id, content["title"], content.get("bibliography", [])),
+        daemon=True,
+    ).start()
+    return {"status": "processing"}
+
+
+@app.get("/papers/{paper_id}/related-papers")
+def get_related_papers(paper_id: str) -> dict:
+    path = storage.related_papers_json_path(paper_id)
+    if not path.exists():
+        return {"status": "not_started"}
+    return json.loads(path.read_text(encoding="utf-8"))

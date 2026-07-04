@@ -143,6 +143,17 @@
     </ul>
   </section>
   {% endif %}
+
+  {# plan/07-troubleshooting-backlog.md#b-7: opt-in, so most page loads never
+     touch OpenAlex at all. reader.js checks the job status on load (in case
+     a previous visit already triggered it) and only shows the button
+     otherwise. #}
+  <section class="related-papers" data-role="related-papers" data-paper-id="{{ paper_id }}">
+    <h2>{{ t('related_papers_heading') }}</h2>
+    <button type="button" class="related-papers-button" data-role="related-papers-button" hidden>{{ t('related_papers_button') }}</button>
+    <p class="related-papers-status" data-role="related-papers-status" hidden></p>
+    <ul class="related-papers-list" data-role="related-papers-list"></ul>
+  </section>
 </article>
 
 <script type="application/json" id="glossary-data">{{ glossary_json | safe }}</script>
