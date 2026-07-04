@@ -112,7 +112,13 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
                 units.append(ContentUnit(kind="paragraph", text=text))
 
     return NormalizedDocument(
-        units=units, figures=figures, title=title, authors=authors, abstract=abstract, bibliography=bibliography
+        units=units,
+        figures=figures,
+        title=title,
+        authors=authors,
+        abstract=abstract,
+        bibliography=bibliography,
+        unresolved_figure_ref_count=_count_unresolved_figure_refs(body, grobid_id_to_figure_id),
     )
 
 
@@ -307,6 +313,32 @@ def _bib_target_id(ref_elem: ET.Element) -> str | None:
     if target and target.startswith("#"):
         return target[1:]
     return None
+
+
+def _count_unresolved_figure_refs(body: ET.Element, fig_id_map: dict[str, str]) -> int:
+    """Counts <ref type="figure"|"table"> mentions ("as shown in Figure 2")
+    that GROBID itself could not resolve to an extracted figure (plan/07-
+    troubleshooting-backlog.md#b-11) -- either because the ref has no
+    `target` at all (GROBID never even attempted a match, real example:
+    `<ref type="figure">2</ref>` with no target attribute, from a diagram
+    GROBID failed to segment into a <figure> element in the first place),
+    or its target points at a <figure> that ultimately failed to crop
+    (excluded from `fig_id_map`, which _build_figure only populates on
+    success).
+
+    This is a direct, GROBID-native signal -- more precise than
+    re-deriving the same fact by regex-scanning prose for "Figure N",
+    since GROBID has already done the reference-resolution work for us
+    and we're just reading its answer.
+    """
+    count = 0
+    for ref in body.iter(f"{_TEI_NS}ref"):
+        if ref.get("type") not in ("figure", "table"):
+            continue
+        target_id = _bib_target_id(ref)
+        if target_id is None or target_id not in fig_id_map:
+            count += 1
+    return count
 
 
 _CITATION_TOKEN_RE = re.compile(r"\x00CITE:([^\x00]+)\x00(.*?)\x00/CITE\x00", re.DOTALL)

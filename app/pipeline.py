@@ -213,6 +213,23 @@ def _process_pdf(paper_id: str, pdf_bytes: bytes) -> tuple[str, int, int]:
     _write_figures(paper_id, normalized.figures)
     parse_seconds = time.perf_counter() - t0
 
+    if normalized.unresolved_figure_ref_count:
+        # plan/07-troubleshooting-backlog.md#b-11: a real, GROBID-native
+        # signal (not a heuristic re-derived from prose) that the paper
+        # mentions a figure/table GROBID itself never resolved into an
+        # extracted image -- e.g. a diagram it failed to segment as one
+        # <figure> block at all. Purely diagnostic for now: this doesn't
+        # block or alter processing, just makes the gap visible instead of
+        # the reader silently ending up with an unlinked "Figure 2" and no
+        # image, with no way to tell that wasn't intentional.
+        logger.warning(
+            "paper %s references %d figure(s)/table(s) GROBID could not resolve to an extracted image "
+            "(commit=%s)",
+            paper_id,
+            normalized.unresolved_figure_ref_count,
+            version.VERSION_LABEL,
+        )
+
     # Joined with ". " (not just " "): a plain space would let a heading's
     # trailing word glue onto the next paragraph's opening acronym
     # definition (e.g. "1 Introduction" + "Graph Neural Network (GNN)..."),

@@ -92,6 +92,15 @@ class NormalizedDocument:
     authors: list[str] = field(default_factory=list)
     abstract: str | None = None
     bibliography: list[BibliographyEntry] = field(default_factory=list)
+    unresolved_figure_ref_count: int = 0
+    """How many <ref type="figure"|"table"> mentions in the body have no
+    resolvable target (plan/07-troubleshooting-backlog.md#b-11) -- GROBID's
+    own, direct signal that the document references a figure/table it
+    could not itself segment into a real <figure> element (as opposed to
+    us re-deriving this by counting "Figure N" occurrences in prose,
+    which GROBID has already done the resolution work for). Purely
+    diagnostic: pipeline.py logs a warning when this is nonzero, nothing
+    reader-facing changes based on it (yet)."""
 
 
 @dataclass

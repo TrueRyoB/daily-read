@@ -192,6 +192,58 @@ def test_figure_mention_with_no_resolvable_target_stays_plain_text(tmp_path):
     assert "FIGREF" not in normalized.units[0].text
 
 
+def test_unresolved_figure_ref_count_is_zero_when_nothing_is_missing(tmp_path):
+    tei = _wrap_body("<div><p>Just plain text, no figure mentions at all.</p></div>")
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert normalized.unresolved_figure_ref_count == 0
+
+
+def test_unresolved_figure_ref_count_flags_a_ref_with_no_target_at_all(tmp_path):
+    # Real-world shape (plan/07-troubleshooting-backlog.md#b-11): GROBID
+    # marks a mention as type="figure" but emits no target attribute at
+    # all when it never resolved a <figure> element for it in the first
+    # place (as opposed to a target pointing at a real-but-failed-to-crop
+    # figure, covered by the next test).
+    tei = _wrap_body('<div><p>See Figure <ref type="figure">2</ref> for details.</p></div>')
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert normalized.unresolved_figure_ref_count == 1
+
+
+def test_unresolved_figure_ref_count_flags_a_target_that_never_resolved(tmp_path):
+    tei = _wrap_body(
+        """
+        <div xmlns:xml="http://www.w3.org/XML/1998/namespace">
+          <p>As shown in Figure <ref type="figure" target="#fig_missing">3</ref>.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert normalized.unresolved_figure_ref_count == 1
+
+
+def test_unresolved_figure_ref_count_excludes_successfully_resolved_refs(tmp_path):
+    tei = _wrap_body(
+        """
+        <div xmlns:xml="http://www.w3.org/XML/1998/namespace">
+          <p>As shown in Figure <ref type="figure" target="#fig_0">1</ref>.</p>
+          <figure xml:id="fig_0" coords="1,50.0,50.0,500.0,250.0">
+            <head>Figure 1</head>
+            <figDesc>A real figure.</figDesc>
+          </figure>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert len(normalized.figures) == 1
+    assert normalized.unresolved_figure_ref_count == 0
+
+
+def test_unresolved_figure_ref_count_counts_tables_too(tmp_path):
+    tei = _wrap_body('<div><p>See Table <ref type="table">2</ref>.</p></div>')
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert normalized.unresolved_figure_ref_count == 1
+
+
 def test_table_gets_default_label_when_no_head(tmp_path):
     pdf_path = _blank_pdf(tmp_path)
     tei = _wrap_body(
