@@ -704,53 +704,76 @@ main {
   border-color: var(--accent);
 }
 
-/* ---- annotations (plan/05-g): margin notes, styled like .toc/.preread-terms ---- */
+/* ---- annotations (plan/05-g, rewritten by plan/07-troubleshooting-
+   backlog.md#07-aフル対応 into an always-visible panel: PC joins
+   .figures-panel, mobile gets its own .annotations-mobile section
+   matching .bibliography-mobile's pattern -- no more floating
+   button/popover). ---- */
 
-.annotations-queue {
-  margin: 1.5rem 0;
-  padding: 0.75rem 1.25rem;
+.annotations-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.annotation-compose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.annotation-note-input,
+.annotation-edit-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-  max-width: var(--max-measure);
+  border-radius: 8px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
 }
 
-.annotations-queue summary {
+.annotation-save-button {
+  align-self: flex-start;
+  padding: 0.3rem 0.9rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.85rem;
   cursor: pointer;
-  font-weight: 700;
-  padding: 0.25rem 0;
 }
 
-.annotations-queue ul {
+.annotation-panel-list {
   list-style: none;
-  margin: 0.6rem 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
-.annotation-queue-item {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+.annotation-panel-item {
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
-.annotation-queue-item .annotation-quote {
+.annotation-panel-item .annotation-quote {
   margin: 0 0 0.3rem;
   font-size: 0.85rem;
   color: var(--muted);
   font-style: italic;
 }
 
-.annotation-queue-item .annotation-note-text {
+.annotation-panel-item .annotation-comment-text {
   margin: 0 0 0.5rem;
-  font-size: 0.95rem;
   white-space: pre-wrap;
 }
 
-.annotation-queue-actions {
+.annotation-panel-actions {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -758,7 +781,7 @@ main {
   font-size: 0.85rem;
 }
 
-.annotation-queue-actions button {
+.annotation-panel-actions button {
   padding: 0.2rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -769,7 +792,7 @@ main {
   cursor: pointer;
 }
 
-.annotation-queue-actions button:hover {
+.annotation-panel-actions button:hover {
   color: var(--text);
   border-color: var(--accent);
 }
@@ -805,77 +828,6 @@ main {
   to {
     background: transparent;
   }
-}
-
-.annotation-add-btn {
-  position: absolute;
-  z-index: 60;
-  padding: 0.35rem 0.8rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-family: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.annotation-popover {
-  position: absolute;
-  z-index: 60;
-  max-width: 20rem;
-  background: var(--panel-bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 0.9rem 1rem;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-}
-
-.annotation-popover .ap-quote {
-  margin: 0 0 0.5rem;
-  font-style: italic;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.annotation-popover .ap-note {
-  margin: 0 0 0.6rem;
-  white-space: pre-wrap;
-}
-
-.annotation-popover .ap-textarea {
-  width: 100%;
-  font-family: inherit;
-  font-size: 0.9rem;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  resize: vertical;
-  margin-bottom: 0.6rem;
-}
-
-.annotation-popover .ap-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.annotation-popover .ap-actions button {
-  padding: 0.3rem 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.annotation-popover .ap-actions button:hover {
-  border-color: var(--accent);
 }
 
 .reader-layout {
@@ -1123,7 +1075,8 @@ main {
   line-height: 1;
 }
 
-.bibliography-mobile {
+.bibliography-mobile,
+.annotations-mobile {
   display: none;
 }
 
@@ -1134,15 +1087,21 @@ main {
   .figures-panel {
     display: none;
   }
-  .bibliography-mobile {
+  .bibliography-mobile,
+  .annotations-mobile {
     display: block;
     margin: 1.5rem 0;
     max-width: var(--max-measure);
   }
-  .bibliography-mobile h2 {
+  .bibliography-mobile h2,
+  .annotations-mobile h2 {
     font-size: 1.05rem;
   }
   .bibliography-mobile .bib-entry {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .annotations-mobile .annotation-panel-item {
     padding: 0.6rem 0;
     border-bottom: 1px solid var(--border);
   }

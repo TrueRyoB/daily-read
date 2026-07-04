@@ -14,6 +14,40 @@
   {%- else %} {{ entry.title }}{% endif %}
 </li>
 {% endmacro %}
+{% macro annotation_entry(annotation, in_panel=True) %}
+{# Same "two DOM copies, one id scheme per copy" pattern as bib_entry above
+   -- reader.js's marker-click jump target depends on a real, unique id
+   regardless of which layout is currently visible. data-raw-note carries
+   the original Markdown text back out for in-place editing (the quotes/
+   comment shown below are already split apart for display). #}
+<li id="{% if in_panel %}annotation-panel-{{ annotation.id }}{% else %}annotation-panel-mobile-{{ annotation.id }}{% endif %}" class="annotation-panel-item{% if in_panel %} panel-item{% endif %}" data-annotation-id="{{ annotation.id }}" data-raw-note="{{ annotation.note }}">
+  {% for quote in annotation.parsed.quotes %}
+  <p class="annotation-quote">「{{ quote }}」</p>
+  {% endfor %}
+  {% if annotation.parsed.comment %}
+  <p class="annotation-comment-text">{{ annotation.parsed.comment }}</p>
+  {% endif %}
+  <div class="annotation-panel-actions">
+    {% if annotation.found %}
+    <button type="button" class="annotation-jump" data-annotation-id="{{ annotation.id }}">{{ t('annotation_jump') }}</button>
+    {% else %}
+    <span class="annotation-not-found">{{ t('annotation_not_found') }}</span>
+    {% endif %}
+    <button type="button" class="annotation-edit" data-annotation-id="{{ annotation.id }}">{{ t('edit') }}</button>
+    <button type="button" class="annotation-delete" data-annotation-id="{{ annotation.id }}">{{ t('delete') }}</button>
+  </div>
+</li>
+{% endmacro %}
+{% macro annotation_compose_form() %}
+{# Replaces the old text-selection -> floating-button -> popover trigger
+   (plan/07-troubleshooting-backlog.md#07-aフル対応): a single always-
+   visible textarea, always available, no interaction with the reading
+   flow required to open it. #}
+<form data-role="annotation-compose-form" class="annotation-compose-form">
+  <textarea data-role="annotation-note-input" class="annotation-note-input" rows="3" placeholder="{{ t('annotation_compose_placeholder') }}"></textarea>
+  <button type="submit" class="annotation-save-button">{{ t('ap_save') }}</button>
+</form>
+{% endmacro %}
 {% block content %}
 <article class="reader" data-paper-id="{{ paper_id }}">
   <header class="reader-header" id="top">
@@ -67,30 +101,6 @@
   </details>
   {% endif %}
 
-  {# plan/07-troubleshooting-backlog.md#b-2: open by default so notes are
-     visible at a glance without an extra click, and so the browser's
-     native find-in-page can actually see/auto-expand into their text. #}
-  <details class="annotations-queue" {% if not annotations %}hidden{% else %}open{% endif %}>
-    <summary>{{ t('annotations_heading', count=annotations | length) }}</summary>
-    <ul data-role="annotation-list">
-      {% for annotation in annotations %}
-      <li class="annotation-queue-item" data-annotation-id="{{ annotation.id }}">
-        <p class="annotation-quote">「{{ annotation.quote }}」</p>
-        <p class="annotation-note-text">{{ annotation.note }}</p>
-        <div class="annotation-queue-actions">
-          {% if annotation.found %}
-          <button type="button" class="annotation-jump" data-annotation-id="{{ annotation.id }}">{{ t('annotation_jump') }}</button>
-          {% else %}
-          <span class="annotation-not-found">{{ t('annotation_not_found') }}</span>
-          {% endif %}
-          <button type="button" class="annotation-edit" data-annotation-id="{{ annotation.id }}">{{ t('edit') }}</button>
-          <button type="button" class="annotation-delete" data-annotation-id="{{ annotation.id }}">{{ t('delete') }}</button>
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
-  </details>
-
   <div class="reader-layout">
     <div class="reader-body">
       {% for unit in rendered_units %}
@@ -107,7 +117,10 @@
       {% endfor %}
     </div>
 
-    {% if content.figures or content.bibliography %}
+    {# Always rendered now (plan/07-troubleshooting-backlog.md#07-aフル対応):
+       this panel is also the permanent home of the comment compose form
+       + list, so it can't be conditioned on figures/bibliography existing
+       the way it could when it only held those two. #}
     <aside class="figures-panel">
       {% if content.figures %}
       <h2>{{ t('figures_heading') }}</h2>
@@ -129,8 +142,17 @@
         </ul>
       </div>
       {% endif %}
+
+      <div class="annotations-section">
+        <h2>{{ t('annotations_heading', count=annotations | length) }}</h2>
+        {{ annotation_compose_form() }}
+        <ul class="annotation-panel-list">
+          {% for annotation in annotations %}
+          {{ annotation_entry(annotation) }}
+          {% endfor %}
+        </ul>
+      </div>
     </aside>
-    {% endif %}
   </div>
 
   {% if content.bibliography %}
@@ -143,6 +165,16 @@
     </ul>
   </section>
   {% endif %}
+
+  <section class="annotations-mobile">
+    <h2>{{ t('annotations_heading', count=annotations | length) }}</h2>
+    {{ annotation_compose_form() }}
+    <ul class="annotation-panel-list">
+      {% for annotation in annotations %}
+      {{ annotation_entry(annotation, in_panel=False) }}
+      {% endfor %}
+    </ul>
+  </section>
 
   {# plan/07-troubleshooting-backlog.md#b-7: opt-in, so most page loads never
      touch OpenAlex at all. reader.js checks the job status on load (in case
@@ -159,7 +191,6 @@
 <script type="application/json" id="glossary-data">{{ glossary_json | safe }}</script>
 <script type="application/json" id="figures-data">{{ figures_json | safe }}</script>
 <script type="application/json" id="bibliography-data">{{ bibliography_json | safe }}</script>
-<script type="application/json" id="annotations-data">{{ annotations_json | safe }}</script>
 <div id="glossary-popover" class="glossary-popover" hidden></div>
 
 <div id="figure-modal" class="figure-modal" hidden>
@@ -171,9 +202,6 @@
   </div>
 </div>
 
-<button type="button" id="annotation-add-btn" class="annotation-add-btn" hidden>{{ t('annotation_add_button') }}</button>
-
-<div id="annotation-popover" class="annotation-popover" hidden></div>
 <script type="application/json" id="i18n-data">{{ i18n_json | safe }}</script>
 
 <script src="/static/reader.js"></script>

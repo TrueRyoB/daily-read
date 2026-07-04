@@ -220,6 +220,7 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
     unit_matches, matched_ids = rendering.match_annotations(content["units"], annotations)
     for annotation in annotations:
         annotation["found"] = annotation["id"] in matched_ids
+        annotation["parsed"] = rendering.parse_annotation_note(annotation["note"])
     for unit_index, annotation_ids in unit_matches.items():
         rendered_units[unit_index]["annotation_ids"] = annotation_ids
 
@@ -239,7 +240,6 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
             "toc_entries": toc_entries,
             "search_url": rendering.search_url,
             "annotations": annotations,
-            "annotations_json": rendering.annotations_json(annotations),
             "i18n_json": json.dumps(i18n.js_translations(locale), ensure_ascii=False),
         },
     )
@@ -270,21 +270,17 @@ def paper_status(paper_id: str) -> dict:
 
 
 @app.post("/papers/{paper_id}/annotations")
-def create_annotation(
-    paper_id: str,
-    quote: str = Body(..., embed=True),
-    prefix: str = Body("", embed=True),
-    suffix: str = Body("", embed=True),
-    note: str = Body(..., embed=True),
-) -> dict:
-    """Personal margin note anchored to a quoted substring (plan/05-g)."""
-    if not quote.strip() or not note.strip():
-        raise HTTPException(status_code=400, detail="quoteとnoteは必須です。")
+def create_annotation(paper_id: str, note: str = Body(..., embed=True)) -> dict:
+    """Personal margin note (plan/07-troubleshooting-backlog.md#07-a
+    フル対応): free-form text, `>`-prefixed lines are quotes from the
+    paper (see rendering.parse_annotation_note/match_annotations)."""
+    if not note.strip():
+        raise HTTPException(status_code=400, detail="noteは必須です。")
     conn = db.get_connection()
     try:
         if db.get_paper(conn, paper_id) is None:
             raise HTTPException(status_code=404, detail="論文が見つかりません")
-        return db.create_annotation(conn, paper_id=paper_id, quote=quote, prefix=prefix, suffix=suffix, note=note)
+        return db.create_annotation(conn, paper_id=paper_id, note=note)
     finally:
         conn.close()
 

@@ -109,16 +109,49 @@ def figures_json(figures: list[dict], paper_id: str) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[int, list[int]], set[int]]:
-    """Re-find each saved annotation's quote against the *current* units
-    (plan/05-g) -- annotations live in SQLite, independent of content.json,
-    so a paper reprocess (which can change unit wording) must degrade
-    gracefully instead of crashing or silently losing notes.
+_QUOTE_LINE_PREFIX = ">"
 
-    Two-pass matching per annotation: prefix+quote+suffix (strict) first,
-    then quote alone (loose) if that fails. First matching unit in reading
-    order wins if the quote appears more than once -- a known, documented
-    limitation, not a crash.
+
+def parse_annotation_note(note: str) -> dict:
+    """Splits a saved annotation's raw note into its quoted lines and its
+    plain comment text (plan/07-troubleshooting-backlog.md#07-aフル対応):
+    a line whose first non-whitespace character is `>` is a quote from the
+    paper (one line = one quote, no multi-line quote grouping -- keeps the
+    parsing unambiguous), everything else is comment prose. One annotation
+    can carry N quotes.
+
+    Parsed at render time, every call, rather than cached into a separate
+    DB column at save time -- a cached `quotes` column could silently
+    drift from `note` after an edit; re-parsing the single source of truth
+    can't drift."""
+    quotes = []
+    comment_lines = []
+    for line in (note or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(_QUOTE_LINE_PREFIX):
+            quote = stripped[1:].strip()
+            if quote:
+                quotes.append(quote)
+        elif stripped:
+            comment_lines.append(stripped)
+    return {"quotes": quotes, "comment": "\n".join(comment_lines)}
+
+
+def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[int, list[int]], set[int]]:
+    """Re-find each saved annotation's quote(s) against the *current* units
+    (plan/05-g, extended to N quotes per annotation by plan/07-
+    troubleshooting-backlog.md#07-aフル対応) -- annotations live in
+    SQLite, independent of content.json, so a paper reprocess (which can
+    change unit wording) must degrade gracefully instead of crashing or
+    silently losing notes.
+
+    Each of an annotation's quotes is matched independently (loose
+    substring match only -- there's no captured prefix/suffix context for
+    a typed note the way there was for a browser text selection). First
+    matching unit in reading order wins if a quote appears more than once
+    -- a known, documented limitation, not a crash. An annotation is
+    "found" if at least one of its quotes matched anywhere (v1: no
+    per-quote found/not-found granularity).
 
     Returns ({unit_index: [annotation_id, ...]}, {matched_annotation_id}).
     Unmatched annotations are simply absent from both -- callers should
@@ -131,15 +164,14 @@ def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[
     matched_ids: set[int] = set()
 
     for ann in annotations:
-        quote = ann.get("quote") or ""
-        if not quote:
-            continue
-        strict = f"{ann.get('prefix', '')}{quote}{ann.get('suffix', '')}"
-        found_index = _find_unit_index(unit_texts, strict)
-        if found_index is None:
+        quotes = parse_annotation_note(ann.get("note") or "")["quotes"]
+        for quote in quotes:
             found_index = _find_unit_index(unit_texts, quote)
-        if found_index is not None:
-            matches.setdefault(found_index, []).append(ann["id"])
+            if found_index is None:
+                continue
+            ids_here = matches.setdefault(found_index, [])
+            if ann["id"] not in ids_here:
+                ids_here.append(ann["id"])
             matched_ids.add(ann["id"])
 
     return matches, matched_ids
@@ -155,15 +187,10 @@ def _find_unit_index(unit_texts: list[str | None], needle: str) -> int | None:
 def _visible_text(text: str) -> str:
     """The plain text a browser's `textContent` would show for this unit
     (citation/figure-mention placeholders resolved to their visible label,
-    .gloss spans don't change visible text at all) -- what the frontend
-    actually captured `quote`/`prefix`/`suffix` from, so matching happens
-    on the same string shape."""
+    .gloss spans don't change visible text at all) -- a typed `>`-quote is
+    matched against this same string shape, since that's what the reader
+    was looking at when they copied it in."""
     return FIGURE_MENTION_PLACEHOLDER_RE.sub(r"\2", CITATION_PLACEHOLDER_RE.sub(r"\2", text))
-
-
-def annotations_json(annotations: list[dict]) -> str:
-    """Serialize annotations for reader.js's queue/marker wiring."""
-    return json.dumps(annotations, ensure_ascii=False)
 
 
 def interpretations_json(interpretations: list[dict]) -> str:

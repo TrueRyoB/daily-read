@@ -234,23 +234,21 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
   });
 })();
 
-// Reader annotations (plan/05-g): select text inside a single
-// paragraph/heading to leave a margin note, like writing on a printed
-// paper. Selection is deliberately restricted to one block -- see
-// plan/05-user-feedback-round2.md#05-g for why cross-block anchoring was
-// scoped out. Independent IIFE: unrelated DOM/state from the two above.
+// Reader annotations (plan/05-g, rewritten by plan/07-troubleshooting-
+// backlog.md#07-aフル対応): always-visible compose panel + Markdown-ish
+// `>`-quote syntax, replacing the old text-selection -> floating-button ->
+// popover flow entirely. Every mutation (create/edit/delete) reloads the
+// page afterward rather than patching the DOM in place -- matching is now
+// N-quotes-per-annotation and happens server-side (rendering.py), so a
+// reload is the only way to stay correct without duplicating that logic
+// in JS (same reload-after-save pattern calendar.js already uses).
 (function () {
   const article = document.querySelector(".reader");
-  const dataEl = document.getElementById("annotations-data");
-  const addBtn = document.getElementById("annotation-add-btn");
-  const popover = document.getElementById("annotation-popover");
-  if (!article || !dataEl || !addBtn || !popover) return;
+  if (!article) return;
 
   const paperId = article.dataset.paperId;
-  const annotationsById = new Map(
-    JSON.parse(dataEl.textContent || "[]").map((a) => [String(a.id), a])
-  );
-  let pendingSelection = null; // {quote, prefix, suffix, blockEl}
+  const figuresPanel = document.querySelector(".figures-panel");
+  const isMobileLayout = () => window.matchMedia("(max-width: 860px)").matches;
 
   function escapeHtml(str) {
     const div = document.createElement("div");
@@ -258,258 +256,110 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
     return div.innerHTML;
   }
 
-  function blockContext(blockEl, quote, approxStart) {
-    const full = blockEl.textContent;
-    let idx = full.indexOf(quote, Math.max(0, approxStart - quote.length));
-    if (idx === -1) idx = full.indexOf(quote);
-    if (idx === -1) return { prefix: "", suffix: "" };
-    return {
-      prefix: full.slice(Math.max(0, idx - 40), idx),
-      suffix: full.slice(idx + quote.length, idx + quote.length + 40),
-    };
-  }
-
-  function closestBlock(node) {
-    const el = node.nodeType === 1 ? node : node.parentElement;
-    return el ? el.closest("h2, h3, h4, p") : null;
-  }
-
-  function hideAddButton() {
-    addBtn.hidden = true;
-  }
-
-  function hidePopover() {
-    popover.hidden = true;
-    popover.dataset.mode = "";
-  }
-
-  function positionNear(rect) {
-    const width = popover.offsetWidth || 280;
-    const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
-    popover.style.left = `${left}px`;
-    popover.style.top = `${rect.bottom + window.scrollY + 8}px`;
-  }
-
-  document.addEventListener("mouseup", (event) => {
-    if (event.target.closest("#annotation-popover, #annotation-add-btn, .annotations-queue")) return;
-
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      hideAddButton();
-      pendingSelection = null;
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    const startBlock = closestBlock(range.startContainer);
-    const endBlock = closestBlock(range.endContainer);
-    const quote = selection.toString().trim();
-    if (!startBlock || startBlock !== endBlock || !startBlock.closest(".reader-body") || !quote) {
-      hideAddButton();
-      pendingSelection = null;
-      return;
-    }
-
-    const { prefix, suffix } = blockContext(startBlock, quote, range.startOffset);
-    pendingSelection = { quote, prefix, suffix, blockEl: startBlock };
-
-    const rect = range.getBoundingClientRect();
-    addBtn.hidden = false;
-    addBtn.style.left = `${Math.max(8, rect.left)}px`;
-    addBtn.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  document.querySelectorAll('[data-role="annotation-compose-form"]').forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const textarea = form.querySelector('[data-role="annotation-note-input"]');
+      const note = textarea ? textarea.value.trim() : "";
+      if (!note) return;
+      fetch(`/papers/${paperId}/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      })
+        .then((res) => (res.ok ? location.reload() : Promise.reject(res)))
+        .catch(() => {});
+    });
   });
 
-  addBtn.addEventListener("click", () => {
-    if (!pendingSelection) return;
-    popover.innerHTML =
-      `<p class="ap-quote">「${escapeHtml(pendingSelection.quote)}」</p>` +
-      `<textarea class="ap-textarea" placeholder="${I18N.ap_note_placeholder}" rows="3"></textarea>` +
-      '<div class="ap-actions">' +
-      `<button type="button" class="ap-save">${I18N.ap_save}</button>` +
-      `<button type="button" class="ap-cancel">${I18N.ap_cancel}</button>` +
-      "</div>";
-    popover.dataset.mode = "compose";
-    popover.hidden = false;
-    positionNear(pendingSelection.blockEl.getBoundingClientRect());
-    popover.querySelector(".ap-textarea")?.focus();
-    hideAddButton();
-  });
-
-  function insertMarker(blockEl, annotationId) {
-    blockEl.classList.add("annotated-block");
-    const marker = document.createElement("button");
-    marker.type = "button";
-    marker.className = "annotation-marker";
-    marker.dataset.annotationId = annotationId;
-    marker.setAttribute("aria-label", I18N.annotation_marker_aria);
-    marker.textContent = "\u{1F4DD}";
-    blockEl.insertBefore(marker, blockEl.firstChild);
+  function jumpToAnnotation(annotationId) {
+    const targetId = isMobileLayout() ? `annotation-panel-mobile-${annotationId}` : `annotation-panel-${annotationId}`;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    if (!isMobileLayout() && figuresPanel) {
+      // Same independent-scroll-column behavior as figure/citation jumps
+      // (see the IIFE above) -- the desktop panel scrolls itself, not the page.
+      figuresPanel.querySelectorAll(".panel-item.is-active").forEach((el) => el.classList.remove("is-active"));
+      target.classList.add("is-active");
+      const delta = target.getBoundingClientRect().top - figuresPanel.getBoundingClientRect().top;
+      figuresPanel.scrollTop += delta;
+    } else {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    target.classList.add("annotation-flash");
+    setTimeout(() => target.classList.remove("annotation-flash"), 1500);
   }
 
-  function queueList() {
-    return document.querySelector('[data-role="annotation-list"]');
+  function jumpToText(annotationId) {
+    // Body -> panel is jumpToAnnotation above; this is the reverse
+    // (panel -> body). With N quotes per annotation there can be multiple
+    // markers sharing the same id -- querySelector's first-in-document-
+    // order match is the same "first occurrence wins" convention already
+    // used server-side (rendering.match_annotations).
+    const marker = document.querySelector(`.annotation-marker[data-annotation-id="${annotationId}"]`);
+    const block = marker ? marker.closest(".annotated-block") : null;
+    if (!block) return;
+    block.scrollIntoView({ behavior: "smooth", block: "center" });
+    block.classList.add("annotation-flash");
+    setTimeout(() => block.classList.remove("annotation-flash"), 1500);
   }
 
-  function updateQueueVisibility() {
-    const list = queueList();
-    const countEl = document.querySelector('[data-role="annotation-count"]');
-    const details = document.querySelector(".annotations-queue");
-    if (!list || !countEl || !details) return;
-    countEl.textContent = list.children.length;
-    details.hidden = list.children.length === 0;
-  }
-
-  function addQueueEntry(annotation, found) {
-    const list = queueList();
-    if (!list) return;
-    const li = document.createElement("li");
-    li.className = "annotation-queue-item";
-    li.dataset.annotationId = annotation.id;
+  function toggleEdit(li) {
+    if (li.dataset.editing === "true") return;
+    const originalHtml = li.innerHTML;
+    const rawNote = li.dataset.rawNote || "";
+    li.dataset.editing = "true";
     li.innerHTML =
-      `<p class="annotation-quote">「${escapeHtml(annotation.quote)}」</p>` +
-      `<p class="annotation-note-text">${escapeHtml(annotation.note)}</p>` +
-      '<div class="annotation-queue-actions">' +
-      (found
-        ? `<button type="button" class="annotation-jump" data-annotation-id="${annotation.id}">${I18N.annotation_jump}</button>`
-        : `<span class="annotation-not-found">${I18N.annotation_not_found}</span>`) +
-      `<button type="button" class="annotation-edit" data-annotation-id="${annotation.id}">${I18N.edit}</button>` +
-      `<button type="button" class="annotation-delete" data-annotation-id="${annotation.id}">${I18N.delete}</button>` +
+      `<textarea class="annotation-edit-textarea" rows="4">${escapeHtml(rawNote)}</textarea>` +
+      '<div class="annotation-panel-actions">' +
+      `<button type="button" class="annotation-save-edit">${I18N.ap_save}</button>` +
+      `<button type="button" class="annotation-cancel-edit">${I18N.ap_cancel}</button>` +
       "</div>";
-    list.appendChild(li);
-    updateQueueVisibility();
-  }
-
-  function saveNewAnnotation() {
-    const textarea = popover.querySelector(".ap-textarea");
-    const note = textarea ? textarea.value.trim() : "";
-    const selection = pendingSelection;
-    if (!note || !selection) return;
-    fetch(`/papers/${paperId}/annotations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quote: selection.quote, prefix: selection.prefix, suffix: selection.suffix, note }),
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject(res)))
-      .then((annotation) => {
-        annotationsById.set(String(annotation.id), annotation);
-        insertMarker(selection.blockEl, annotation.id);
-        addQueueEntry(annotation, true);
-        hidePopover();
-        window.getSelection()?.removeAllRanges();
-        pendingSelection = null;
+    li.querySelector(".annotation-cancel-edit").addEventListener("click", () => {
+      li.innerHTML = originalHtml;
+      li.dataset.editing = "false";
+    });
+    li.querySelector(".annotation-save-edit").addEventListener("click", () => {
+      const note = li.querySelector(".annotation-edit-textarea").value.trim();
+      if (!note) return;
+      fetch(`/papers/${paperId}/annotations/${li.dataset.annotationId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
       })
-      .catch(() => {});
-  }
-
-  function showViewPopover(annotationId, anchorEl) {
-    const annotation = annotationsById.get(String(annotationId));
-    if (!annotation) return;
-    popover.innerHTML =
-      `<p class="ap-quote">「${escapeHtml(annotation.quote)}」</p>` +
-      `<p class="ap-note">${escapeHtml(annotation.note)}</p>` +
-      '<div class="ap-actions">' +
-      `<button type="button" class="ap-edit" data-annotation-id="${annotation.id}">${I18N.edit}</button>` +
-      `<button type="button" class="ap-delete" data-annotation-id="${annotation.id}">${I18N.delete}</button>` +
-      "</div>";
-    popover.dataset.mode = "view";
-    popover.hidden = false;
-    positionNear(anchorEl.getBoundingClientRect());
-  }
-
-  function showEditPopover(annotationId) {
-    const annotation = annotationsById.get(String(annotationId));
-    if (!annotation) return;
-    popover.innerHTML =
-      `<p class="ap-quote">「${escapeHtml(annotation.quote)}」</p>` +
-      `<textarea class="ap-textarea" rows="3">${escapeHtml(annotation.note)}</textarea>` +
-      '<div class="ap-actions">' +
-      `<button type="button" class="ap-save-edit" data-annotation-id="${annotation.id}">${I18N.ap_save}</button>` +
-      `<button type="button" class="ap-cancel">${I18N.ap_cancel}</button>` +
-      "</div>";
-    popover.dataset.mode = "edit";
-    popover.hidden = false;
-  }
-
-  function saveEdit(annotationId) {
-    const textarea = popover.querySelector(".ap-textarea");
-    const note = textarea ? textarea.value.trim() : "";
-    if (!note) return;
-    fetch(`/papers/${paperId}/annotations/${annotationId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note }),
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject(res)))
-      .then((updated) => {
-        annotationsById.set(String(updated.id), updated);
-        const li = document.querySelector(`.annotation-queue-item[data-annotation-id="${updated.id}"]`);
-        const noteEl = li ? li.querySelector(".annotation-note-text") : null;
-        if (noteEl) noteEl.textContent = updated.note;
-        hidePopover();
-      })
-      .catch(() => {});
+        .then((res) => (res.ok ? location.reload() : Promise.reject(res)))
+        .catch(() => {});
+    });
   }
 
   function deleteAnnotation(annotationId) {
     if (!window.confirm(I18N.ap_confirm_delete)) return;
     fetch(`/papers/${paperId}/annotations/${annotationId}`, { method: "DELETE" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(res)))
-      .then(() => {
-        annotationsById.delete(String(annotationId));
-        document.querySelectorAll(`.annotation-marker[data-annotation-id="${annotationId}"]`).forEach((marker) => {
-          const block = marker.closest(".annotated-block");
-          marker.remove();
-          if (block && !block.querySelector(".annotation-marker")) block.classList.remove("annotated-block");
-        });
-        const li = document.querySelector(`.annotation-queue-item[data-annotation-id="${annotationId}"]`);
-        if (li) li.remove();
-        updateQueueVisibility();
-        hidePopover();
-      })
+      .then((res) => (res.ok ? location.reload() : Promise.reject(res)))
       .catch(() => {});
   }
 
   document.addEventListener("click", (event) => {
     const marker = event.target.closest(".annotation-marker");
     if (marker) {
-      showViewPopover(marker.dataset.annotationId, marker);
+      jumpToAnnotation(marker.dataset.annotationId);
       event.stopPropagation();
       return;
     }
     const jumpBtn = event.target.closest(".annotation-jump");
     if (jumpBtn) {
-      const target = document.querySelector(`.annotation-marker[data-annotation-id="${jumpBtn.dataset.annotationId}"]`);
-      const block = target ? target.closest(".annotated-block") : null;
-      if (block) {
-        block.scrollIntoView({ behavior: "smooth", block: "center" });
-        block.classList.add("annotation-flash");
-        setTimeout(() => block.classList.remove("annotation-flash"), 1500);
-      }
+      jumpToText(jumpBtn.dataset.annotationId);
       return;
     }
-    const editBtn = event.target.closest(".annotation-edit, .ap-edit");
+    const editBtn = event.target.closest(".annotation-edit");
     if (editBtn) {
-      showEditPopover(editBtn.dataset.annotationId);
+      const li = editBtn.closest(".annotation-panel-item");
+      if (li) toggleEdit(li);
       return;
     }
-    const deleteBtn = event.target.closest(".annotation-delete, .ap-delete");
+    const deleteBtn = event.target.closest(".annotation-delete");
     if (deleteBtn) {
       deleteAnnotation(deleteBtn.dataset.annotationId);
-      return;
-    }
-    if (event.target.closest("#annotation-popover")) {
-      if (event.target.classList.contains("ap-save")) saveNewAnnotation();
-      if (event.target.classList.contains("ap-cancel")) hidePopover();
-      if (event.target.classList.contains("ap-save-edit")) saveEdit(event.target.dataset.annotationId);
-      return;
-    }
-    if (event.target.closest("#annotation-add-btn")) return;
-    hidePopover();
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      hidePopover();
-      hideAddButton();
     }
   });
 })();

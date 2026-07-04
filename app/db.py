@@ -188,19 +188,25 @@ def known_term_keys(conn: sqlite3.Connection) -> set[str]:
     return {row["term_key"] for row in rows}
 
 
-def create_annotation(
-    conn: sqlite3.Connection, *, paper_id: str, quote: str, prefix: str, suffix: str, note: str
-) -> dict:
-    """Personal margin note anchored to a quoted substring (plan/05-g).
-    Lives entirely in SQLite, never in content.json, so reprocessing a
-    paper (which can change unit text/wording) never destroys a note --
-    see rendering.match_annotations for how a saved quote is re-found
-    against whatever units currently exist."""
+def create_annotation(conn: sqlite3.Connection, *, paper_id: str, note: str) -> dict:
+    """Personal margin note (plan/05-g, rewritten by plan/07-troubleshooting-
+    backlog.md#07-aフル対応 into a free-form Markdown-ish `note`: lines
+    starting with `>` are quotes from the paper, everything else is
+    comment text -- see rendering.parse_annotation_note/match_annotations,
+    which parse this at render time rather than caching a derived quote
+    here). Lives entirely in SQLite, never in content.json, so
+    reprocessing a paper (which can change unit text/wording) never
+    destroys a note.
+
+    The quote/prefix/suffix columns are no longer written to (left in the
+    schema rather than dropped, to avoid a destructive migration -- as of
+    this change, production had zero existing rows, so there was nothing
+    to migrate)."""
     now = datetime.now(timezone.utc).isoformat()
     cursor = conn.execute(
         "INSERT INTO annotations (paper_id, quote, prefix, suffix, note, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (paper_id, quote, prefix, suffix, note, now, now),
+        "VALUES (?, '', '', '', ?, ?, ?)",
+        (paper_id, note, now, now),
     )
     conn.commit()
     return get_annotation(conn, cursor.lastrowid)

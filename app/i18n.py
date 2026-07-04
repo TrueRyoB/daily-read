@@ -35,7 +35,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reading_meta": "推定読了時間: 約{minutes}分・{words}語",
         "source_prefix": "出典: {source}",
         "glossary_hint": "下線付きの語句をクリックすると、意味・用例が表示されます。",
-        "annotation_hint": "本文の一部を選択すると、メモを残せます。",
+        "annotation_hint": "コメントはパネル（PC: 右側／スマホ: 記事末尾）から記入できます。本文からの引用は行頭に「>」を付けてください。",
         "preread_heading": "読む前に確認: 本文で定義されていない頻出語",
         "preread_hint": "この論文で3回以上登場しますが、本文中に定義が見つかりませんでした。読む前に調べておくと理解が早まります。",
         "search_link": "調べる ↗",
@@ -48,7 +48,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "delete": "削除",
         "figures_heading": "図表一覧",
         "bibliography_heading": "参考文献",
-        "annotation_add_button": "+ メモを追加",
         "gp_close_aria": "閉じる",
         "gp_source_concordance": "本文中の用例をまとめたものです（辞書的な定義ではありません）",
         "gp_source_bundled": "一般的な略語辞書による補足説明です",
@@ -56,8 +55,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "gp_know": "知っている（今後表示しない）",
         "ap_save": "保存",
         "ap_cancel": "キャンセル",
-        "ap_note_placeholder": "メモを入力",
         "ap_confirm_delete": "このメモを削除しますか？",
+        "annotation_compose_placeholder": "行頭に「>」を付けると本文からの引用として扱われます。それ以外の行はコメントです。",
         "calendar_nav_label": "カレンダー",
         "calendar_heading": "{year}年{month}月",
         "calendar_prev": "← 前月",
@@ -111,7 +110,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reading_meta": "Estimated reading time: ~{minutes} min · {words} words",
         "source_prefix": "Source: {source}",
         "glossary_hint": "Click an underlined term to see its meaning and examples.",
-        "annotation_hint": "Select part of the text to leave a note.",
+        "annotation_hint": "Leave comments in the panel (desktop: right side; mobile: bottom of the article). Start a line with \">\" to mark it as a quote from the text.",
         "preread_heading": "Before you read: frequent terms not defined in the text",
         "preread_hint": "These appear 3+ times in this paper but no definition was found in the text. Looking them up first may help.",
         "search_link": "Look up ↗",
@@ -124,7 +123,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "delete": "Delete",
         "figures_heading": "Figures",
         "bibliography_heading": "References",
-        "annotation_add_button": "+ Add note",
         "gp_close_aria": "Close",
         "gp_source_concordance": "A summary of how this term is used in the text (not a dictionary definition).",
         "gp_source_bundled": "A supplementary explanation from a general abbreviation dictionary.",
@@ -132,8 +130,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "gp_know": "I know this (don't show again)",
         "ap_save": "Save",
         "ap_cancel": "Cancel",
-        "ap_note_placeholder": "Enter a note",
         "ap_confirm_delete": "Delete this note?",
+        "annotation_compose_placeholder": "Start a line with \">\" to mark it as a quote from the text. Other lines are your comment.",
         "calendar_nav_label": "Calendar",
         "calendar_heading": "{month_name} {year}",
         "calendar_prev": "← Previous",
@@ -164,9 +162,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
 }
 
-# Keys reader.js needs client-side (glossary/annotation popovers built by
-# JS at runtime, not by Jinja) -- embedded as JSON in paper.html rather
-# than duplicated as a second hardcoded dict in the JS file.
+# Keys reader.js needs client-side (glossary popover built by JS at
+# runtime, not by Jinja) -- embedded as JSON in paper.html rather than
+# duplicated as a second hardcoded dict in the JS file. Everything the
+# always-visible annotation panel shows is server-rendered by Jinja
+# instead (plan/07-troubleshooting-backlog.md#07-aフル対応: no more
+# popovers/queue items built dynamically in JS), so annotation-related
+# labels don't need to be here anymore -- ap_save/ap_cancel/ap_confirm_delete
+# remain because reader.js's inline edit-in-place UI still builds those
+# three dynamically.
 JS_KEYS = (
     "gp_close_aria",
     "gp_source_concordance",
@@ -175,14 +179,7 @@ JS_KEYS = (
     "gp_know",
     "ap_save",
     "ap_cancel",
-    "ap_note_placeholder",
     "ap_confirm_delete",
-    "edit",
-    "delete",
-    "annotation_marker_aria",
-    "annotation_jump",
-    "annotation_not_found",
-    "annotation_add_button",
     "related_papers_button",
     "related_papers_loading",
     "related_papers_error",
