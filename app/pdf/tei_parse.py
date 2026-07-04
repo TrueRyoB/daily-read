@@ -61,7 +61,7 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
     built_figures: dict[int, Figure | None] = {}
     grobid_id_to_figure_id: dict[str, str] = {}
     with fitz.open(pdf_path) as doc:
-        for idx, (_depth, item) in enumerate(clustered):
+        for idx, (_depth, item, _has_p) in enumerate(clustered):
             if not isinstance(item, list):
                 continue
             figure_counter += 1
@@ -74,8 +74,10 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
                     if grobid_id:
                         grobid_id_to_figure_id[grobid_id] = figure.figure_id
 
-    for idx, (depth, item) in enumerate(clustered):
+    in_stray_diagram_run = False
+    for idx, (depth, item, has_paragraph_sibling) in enumerate(clustered):
         if isinstance(item, list):
+            in_stray_diagram_run = False
             figure = built_figures[idx]
             if figure is not None:
                 units.append(ContentUnit(kind="figure_ref", figure_id=figure.figure_id))
@@ -87,10 +89,24 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
 
         tag = _localname(item.tag)
         if tag == "head":
+            # A diagram's *last* box label can end up sharing its <div>
+            # with the diagram's own real caption paragraph (observed on
+            # the real "Model"/"Fig 2: DAD..." pair) -- that paragraph
+            # sibling would otherwise let it slip past the base
+            # _is_stray_diagram_label check. Once a run of stray labels
+            # has started, any further unnumbered head is treated as part
+            # of the same run regardless of its own paragraph sibling;
+            # the paragraph itself is unaffected, it's a separate stream
+            # item processed on its own next.
+            if _is_stray_diagram_label(item, has_paragraph_sibling) or (in_stray_diagram_run and not item.get("n")):
+                in_stray_diagram_run = True
+                continue
+            in_stray_diagram_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
             if text:
                 units.append(ContentUnit(kind="heading", text=text, level=_infer_level(text, depth)))
         elif tag == "p":
+            in_stray_diagram_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
             if text:
                 units.append(ContentUnit(kind="paragraph", text=text))
@@ -134,8 +150,8 @@ def _parse_bibliography(root: ET.Element) -> list[BibliographyEntry]:
 
 
 def _cluster_adjacent_duplicate_figures(
-    items: list[tuple[int, ET.Element]],
-) -> list[tuple[int, ET.Element | list[ET.Element]]]:
+    items: list[tuple[int, ET.Element, bool]],
+) -> list[tuple[int, ET.Element | list[ET.Element], bool]]:
     """Group consecutive <figure> elements that share the same non-empty
     caption into one cluster.
 
@@ -148,13 +164,17 @@ def _cluster_adjacent_duplicate_figures(
     figures as sub-panels of a single logical figure. Figures with no
     caption at all are never clustered this way (nothing to compare), to
     avoid accidentally merging genuinely unrelated uncaptioned figures.
+
+    The third tuple element (div_has_paragraph, see _walk_body) is passed
+    through unchanged -- irrelevant to figures, only used by parse_tei's
+    own head-vs-diagram-label check.
     """
-    clustered: list[tuple[int, ET.Element | list[ET.Element]]] = []
+    clustered: list[tuple[int, ET.Element | list[ET.Element], bool]] = []
     i, n = 0, len(items)
     while i < n:
-        depth, elem = items[i]
+        depth, elem, has_p = items[i]
         if _localname(elem.tag) != "figure":
-            clustered.append((depth, elem))
+            clustered.append((depth, elem, has_p))
             i += 1
             continue
         cluster = [elem]
@@ -168,7 +188,7 @@ def _cluster_adjacent_duplicate_figures(
         ):
             cluster.append(items[j][1])
             j += 1
-        clustered.append((depth, cluster))
+        clustered.append((depth, cluster, has_p))
         i = j
     return clustered
 
@@ -220,17 +240,23 @@ def _person_name(pers_name: ET.Element) -> str:
 
 
 def _walk_body(elem: ET.Element, depth: int = 0):
-    """Yield (div_nesting_depth, element) for head/p/figure/etc. descendants
-    in document order, flattening arbitrary <div> nesting (GROBID's divs are
-    usually flat, but nested subsections do occur). depth is how many <div>
-    ancestors an element has, starting at 1 for a body's direct child div's
-    contents -- used by _infer_level as a fallback signal for headings that
-    have no numbering text of their own."""
+    """Yield (div_nesting_depth, element, div_has_paragraph) for
+    head/p/figure/etc. descendants in document order, flattening arbitrary
+    <div> nesting (GROBID's divs are usually flat, but nested subsections
+    do occur). depth is how many <div> ancestors an element has, starting
+    at 1 for a body's direct child div's contents -- used by _infer_level
+    as a fallback signal for headings that have no numbering text of
+    their own. div_has_paragraph is whether `elem` (this child's own,
+    immediate parent <div>) has any direct <p> child at all -- used by
+    parse_tei to tell a real (if unnumbered) heading like "ACKNOWLEDGMENTS"
+    apart from a mis-segmented diagram-label fragment sharing an otherwise
+    empty <div> (plan/07-troubleshooting-backlog.md)."""
+    has_paragraph = any(_localname(c.tag) == "p" for c in elem)
     for child in elem:
         if _localname(child.tag) == "div":
             yield from _walk_body(child, depth + 1)
         else:
-            yield depth, child
+            yield depth, child, has_paragraph
 
 
 def _localname(tag: str) -> str:
@@ -321,6 +347,32 @@ def _merge_adjacent_citations(text: str) -> str:
         i = j
     pieces.append(text[last_end:])
     return "".join(pieces)
+
+
+def _is_stray_diagram_label(head: ET.Element, div_has_paragraph: bool) -> bool:
+    """Detects a <head> that is almost certainly a mis-segmented text
+    fragment from a figure (a flowchart/diagram made of short text boxes
+    and arrows -- Mermaid-style diagrams are a common source, since their
+    box labels are short, isolated, and heading-shaped) rather than a
+    real section heading (plan/07-troubleshooting-backlog.md, real-world
+    example: a Deep Adaptive Design paper's Figure 2 pipeline diagram
+    surfaced "Offline training"/"Deploy"/"Live experiment"/"Model" as
+    four separate top-level headings, breaking the reading flow).
+
+    GROBID's layout model occasionally fails to recognize such a diagram
+    as one figure block and instead segments its box labels as their own
+    <div><head>...</head></div> elements with no body text at all.
+
+    Two conditions must BOTH hold, confirmed empirically against a real
+    processed paper: every genuine body-section heading GROBID emits
+    carries its own `n="..."` numbering attribute once inside the body
+    text (from "1." down to "4.1.2" etc.); genuine unnumbered headings
+    that DO occur (e.g. "ACKNOWLEDGMENTS", "FUNDING") always still have
+    real paragraph content in their own <div> -- a bare, paragraph-less
+    div is not how GROBID represents a real (if unnumbered) section.
+    Requiring both keeps every real heading, numbered or not.
+    """
+    return not head.get("n") and not div_has_paragraph
 
 
 def _infer_level(text: str, nesting_depth: int) -> int:

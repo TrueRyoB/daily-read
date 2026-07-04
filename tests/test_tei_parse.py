@@ -55,6 +55,62 @@ def test_line_break_does_not_glue_words_together(tmp_path):
     assert normalized.units[0].text == "wordone wordtwo"
 
 
+def test_stray_diagram_label_heads_are_dropped(tmp_path):
+    # plan/07-troubleshooting-backlog.md: a real processed paper's Figure 2
+    # pipeline diagram (flowchart-style, Mermaid-like box labels) surfaced
+    # "Offline training"/"Deploy"/"Live experiment"/"Model" as four
+    # separate top-level headings -- GROBID's layout model failed to
+    # recognize the diagram as one figure block and instead segmented its
+    # box labels as their own <div><head>...</head></div> elements with no
+    # body text at all.
+    tei = _wrap_body(
+        """
+        <div><head n="4.1">Deep Adaptive Design</head><p>intro text</p></div>
+        <div><head>Offline training</head></div>
+        <div><head>Deploy</head></div>
+        <div><head>Live experiment</head></div>
+        <div><head>Model</head><p>Fig 2: DAD pipeline diagram.</p></div>
+        <div><head n="4.2">Learning Policies</head><p>next section</p></div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    headings = [u.text for u in normalized.units if u.kind == "heading"]
+    assert headings == ["Deep Adaptive Design", "Learning Policies"]
+    # the paragraph sharing a div with a stray head is unaffected
+    paragraphs = [u.text for u in normalized.units if u.kind == "paragraph"]
+    assert "Fig 2: DAD pipeline diagram." in paragraphs
+    assert "intro text" in paragraphs
+
+
+def test_unnumbered_heading_with_its_own_paragraph_is_kept(tmp_path):
+    # Real, if unnumbered, sections like "ACKNOWLEDGMENTS" always still
+    # have real paragraph content in their own <div> -- only a bare,
+    # paragraph-less div is treated as a stray diagram-label fragment.
+    tei = _wrap_body("<div><head>ACKNOWLEDGMENTS</head><p>Thanks to everyone.</p></div>")
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    headings = [u.text for u in normalized.units if u.kind == "heading"]
+    assert headings == ["ACKNOWLEDGMENTS"]
+
+
+def test_numbered_heading_with_no_paragraph_in_its_own_div_is_kept(tmp_path):
+    # A section that's purely an umbrella for subsections (all its content
+    # lives in nested sub-divs) can legitimately have no <p> directly in
+    # its own div -- GROBID's own n="..." numbering is what distinguishes
+    # this from a stray diagram-label fragment, not paragraph presence
+    # alone.
+    tei = _wrap_body(
+        """
+        <div>
+          <head n="3">Methods</head>
+          <div><head n="3.1">Setup</head><p>a</p></div>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    headings = [u.text for u in normalized.units if u.kind == "heading"]
+    assert headings == ["Methods", "Setup"]
+
+
 def test_figure_is_cropped_from_coords_and_removed_from_flow(tmp_path):
     pdf_path = _blank_pdf(tmp_path)
     tei = _wrap_body(
