@@ -66,25 +66,6 @@ body {
   font-size: 0.9rem;
 }
 
-.calendar-nav-link-wrapper {
-  margin: 0 0 1.5rem;
-}
-
-.calendar-nav-link {
-  display: inline-block;
-  color: var(--muted);
-  font-size: 0.9rem;
-  text-decoration: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.3rem 0.9rem;
-}
-
-.calendar-nav-link:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-
 .lang-toggle {
   margin-left: auto;
   color: var(--muted);
@@ -100,7 +81,17 @@ body {
   border-color: var(--accent);
 }
 
-/* ---- calendar view (calendar.html, plan/07-troubleshooting-backlog.md#b-4) ---- */
+/* ---- calendar view (_calendar_widget.html, shared by calendar.html and
+   index.html -- plan/07-troubleshooting-backlog.md#b-4 / later feedback
+   round embedding it directly on the index page) ---- */
+
+.calendar-view {
+  margin: 1.5rem 0 2rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
 
 .calendar-nav {
   display: flex;
@@ -110,7 +101,7 @@ body {
   margin-bottom: 1rem;
 }
 
-.calendar-nav h1 {
+.calendar-nav h2 {
   font-size: 1.3rem;
   margin: 0;
 }
@@ -246,14 +237,32 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.6rem 0.8rem;
-  max-height: 10rem;
-  overflow-y: auto;
 }
 
 .interpretation-papers legend {
   font-size: 0.85rem;
   color: var(--muted);
   padding: 0 0.3rem;
+}
+
+.interpretation-paper-search {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* plan/07-troubleshooting-backlog.md: a plain checkbox list stopped
+   scaling once there were more than a handful of papers -- the search
+   input above stays put while only this list scrolls. */
+.interpretation-paper-options {
+  max-height: 10rem;
+  overflow-y: auto;
 }
 
 .interpretation-paper-option {
@@ -480,10 +489,34 @@ main {
   text-decoration: none;
 }
 
+.paper-list-item-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .paper-meta {
   color: var(--muted);
   white-space: nowrap;
   font-size: 0.9rem;
+}
+
+.paper-delete-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  width: 1.6rem;
+  height: 1.6rem;
+  line-height: 1;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.paper-delete-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .empty-state {
@@ -803,18 +836,19 @@ main {
   font-style: italic;
 }
 
-.annotated-block {
-  position: relative;
-}
-
-.annotation-marker {
+/* plan/07-troubleshooting-backlog.md: the exact quoted substring itself is
+   both the visual cue and the click target now (a 📝 emoji marker button
+   was confusing and not findable via in-page search -- reported
+   feedback). Colored underline rather than a filled background so it
+   stays legible layered over an already-underlined .gloss term. */
+.annotation-highlight {
   background: none;
-  border: none;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 0.15em;
+  text-underline-offset: 3px;
   cursor: pointer;
-  font-size: 0.85em;
-  padding: 0 0.3em 0 0;
-  vertical-align: text-top;
-  line-height: 1;
 }
 
 .annotation-flash {
@@ -959,6 +993,22 @@ main {
 .gloss:focus {
   background: var(--accent-soft);
   outline: none;
+}
+
+/* plan/07-troubleshooting-backlog.md: a "concordance" term never got an
+   actual definition -- only usage examples -- so promising "click to see
+   its meaning" via the same dotted-underline styling as a real defined
+   term was misleading. Muted color instead of the accent color signals
+   "no definition available" at a glance; clicking now offers only "I know
+   this," not a fake definition popover. */
+.gloss-unconfirmed {
+  text-decoration-color: var(--muted);
+}
+
+.gloss-unconfirmed:hover,
+.gloss-unconfirmed:focus {
+  background: none;
+  text-decoration-color: var(--text);
 }
 
 .glossary-popover {

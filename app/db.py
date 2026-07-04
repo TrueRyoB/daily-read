@@ -170,6 +170,23 @@ def get_paper(conn: sqlite3.Connection, paper_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def delete_paper(conn: sqlite3.Connection, paper_id: str) -> bool:
+    """Removes a paper's DB footprint (plan/07-troubleshooting-backlog.md):
+    its own row, its annotations, and its interpretation_papers links.
+    Cross-paper-reusable state (known_terms, and heuristic.py's in-memory
+    NER judgment cache) is untouched -- neither has a paper_id column, so
+    nothing here can accidentally delete it. interpretations themselves
+    are left alone even if this was their only linked paper: the memo/
+    links a reader wrote there are still meaningful on their own (mirrors
+    delete_interpretation's manual-cascade pattern below, no FK
+    enforcement is relied on)."""
+    cursor = conn.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+    conn.execute("DELETE FROM annotations WHERE paper_id = ?", (paper_id,))
+    conn.execute("DELETE FROM interpretation_papers WHERE paper_id = ?", (paper_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def mark_term_known(conn: sqlite3.Connection, term: str) -> None:
     """Record that the reader already knows `term`, persisted across every
     paper from now on (plan/04-b) -- keyed by normalize_term_key so case and

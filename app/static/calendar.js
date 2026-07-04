@@ -28,6 +28,22 @@
     });
   }
 
+  // --- Paper picker search filter (plan/07-troubleshooting-backlog.md):
+  // a plain checkbox list of every paper doesn't scale once there are more
+  // than a handful -- filter which ones are shown, without touching which
+  // are checked (a filtered-out-but-checked paper stays checked). ---
+  const paperSearchInput = document.querySelector('[data-role="paper-search"]');
+  const paperOptions = document.querySelector('[data-role="paper-options"]');
+  if (paperSearchInput && paperOptions) {
+    paperSearchInput.addEventListener("input", () => {
+      const query = paperSearchInput.value.trim().toLowerCase();
+      paperOptions.querySelectorAll(".interpretation-paper-option").forEach((label) => {
+        const title = label.dataset.title || "";
+        label.hidden = query.length > 0 && !title.includes(query);
+      });
+    });
+  }
+
   // --- Form submission ---
   form.addEventListener("submit", (event) => {
     event.preventDefault();

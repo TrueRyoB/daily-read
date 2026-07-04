@@ -15,6 +15,7 @@ from __future__ import annotations
 import calendar as _calendar_module
 import json
 import logging
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,14 +67,42 @@ def _render(request: Request, template_name: str, context: dict) -> HTMLResponse
     return response
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
+def _calendar_context(year: int, month: int) -> dict:
+    """Shared by index() and calendar_view() (plan/07-troubleshooting-
+    backlog.md): the calendar widget itself (_calendar_widget.html) is now
+    embedded directly on the index page -- previously reachable only via
+    one easy-to-miss nav link -- while /calendar keeps working unchanged
+    for direct links/bookmarks. `today_date` defaults the interpretation
+    form's date field to today (still freely editable, never validated)."""
     conn = db.get_connection()
     try:
+        interpretations = db.list_interpretations_in_month(conn, year, month)
         papers = db.list_papers(conn)
     finally:
         conn.close()
-    return _render(request, "index.html", {"papers": papers})
+
+    calendar_data = rendering.build_calendar_month(interpretations, year, month)
+    prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+    return {
+        "calendar": calendar_data,
+        "month_name": _calendar_module.month_name[month],
+        "prev_month": f"{prev_year:04d}-{prev_month:02d}",
+        "next_month": f"{next_year:04d}-{next_month:02d}",
+        "papers": papers,  # populates the "related papers" picker in the create form
+        "interpretations_json": rendering.interpretations_json(interpretations),
+        "today_date": datetime.now(timezone.utc).date().isoformat(),
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request) -> HTMLResponse:
+    # _calendar_context's own "papers" key is already the full unfiltered
+    # list (db.list_papers isn't month-scoped) -- the history section below
+    # the calendar widget reuses that same list, not a second query.
+    now = datetime.now(timezone.utc)
+    return _render(request, "index.html", _calendar_context(now.year, now.month))
 
 
 @app.get("/calendar", response_class=HTMLResponse)
@@ -91,29 +120,7 @@ def calendar_view(request: Request, month: str | None = None) -> HTMLResponse:
         except ValueError:
             pass  # malformed ?month= -- fall back to the current month
 
-    conn = db.get_connection()
-    try:
-        interpretations = db.list_interpretations_in_month(conn, year, month_num)
-        papers = db.list_papers(conn)
-    finally:
-        conn.close()
-
-    calendar_data = rendering.build_calendar_month(interpretations, year, month_num)
-    prev_year, prev_month = (year - 1, 12) if month_num == 1 else (year, month_num - 1)
-    next_year, next_month = (year + 1, 1) if month_num == 12 else (year, month_num + 1)
-
-    return _render(
-        request,
-        "calendar.html",
-        {
-            "calendar": calendar_data,
-            "month_name": _calendar_module.month_name[month_num],
-            "prev_month": f"{prev_year:04d}-{prev_month:02d}",
-            "next_month": f"{next_year:04d}-{next_month:02d}",
-            "papers": papers,  # populates the "related papers" picker in the create form
-            "interpretations_json": rendering.interpretations_json(interpretations),
-        },
-    )
+    return _render(request, "calendar.html", _calendar_context(year, month_num))
 
 
 @app.post("/interpretations")
@@ -202,27 +209,30 @@ def read_paper(request: Request, paper_id: str) -> HTMLResponse:
     content = json.loads(storage.content_json_path(paper_id).read_text(encoding="utf-8"))
     content.setdefault("bibliography", [])  # absent in content.json written before plan/03-c
     content["glossary"] = rendering.filter_known_terms(content["glossary"], known_term_keys)
-    rendered_units = rendering.render_units(content["units"], content["glossary"], content["bibliography"])
-    toc_entries = rendering.table_of_contents(rendered_units)
-    # "concordance" entries are frequent terms the paper never defines and
-    # no bundled dictionary covers either -- surface them as a pre-reading
-    # checklist instead of only reactively, inline (plan/04-c).
-    preread_terms = [e for e in content["glossary"] if e["source"] == "concordance"]
 
     # Annotations live entirely in SQLite (plan/05-g), independent of
     # content.json, so they're re-matched against whatever units currently
     # exist on every read rather than being baked in at pipeline time.
+    # Fetched before render_units so each matched quote's <mark> highlight
+    # can be embedded directly into unit["html"] at its exact character
+    # range (plan/07-troubleshooting-backlog.md), not attached separately.
     conn = db.get_connection()
     try:
         annotations = db.list_annotations(conn, paper_id)
     finally:
         conn.close()
-    unit_matches, matched_ids = rendering.match_annotations(content["units"], annotations)
+    rendered_units, matched_ids = rendering.render_units(
+        content["units"], content["glossary"], content["bibliography"], annotations
+    )
     for annotation in annotations:
         annotation["found"] = annotation["id"] in matched_ids
         annotation["parsed"] = rendering.parse_annotation_note(annotation["note"])
-    for unit_index, annotation_ids in unit_matches.items():
-        rendered_units[unit_index]["annotation_ids"] = annotation_ids
+
+    toc_entries = rendering.table_of_contents(rendered_units)
+    # "concordance" entries are frequent terms the paper never defines and
+    # no bundled dictionary covers either -- surface them as a pre-reading
+    # checklist instead of only reactively, inline (plan/04-c).
+    preread_terms = [e for e in content["glossary"] if e["source"] == "concordance"]
 
     locale, _ = _locale_context(request)
     return _render(
@@ -267,6 +277,25 @@ def paper_status(paper_id: str) -> dict:
     created_at = datetime.fromisoformat(paper["created_at"])
     elapsed_seconds = max(0, int((datetime.now(timezone.utc) - created_at).total_seconds()))
     return {"status": "processing", "elapsed_seconds": elapsed_seconds}
+
+
+@app.delete("/papers/{paper_id}")
+def remove_paper(paper_id: str) -> dict:
+    """Frees a paper's storage on request (plan/07-troubleshooting-
+    backlog.md): the reader can reclaim disk space instead of history
+    growing unbounded. Cross-paper-reusable state -- known_terms and
+    heuristic.py's in-memory NER judgment cache -- is untouched: neither
+    has a paper_id column or lives under this paper's own storage
+    directory, so nothing here can accidentally delete it."""
+    conn = db.get_connection()
+    try:
+        deleted = db.delete_paper(conn, paper_id)
+    finally:
+        conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="論文が見つかりません")
+    shutil.rmtree(storage.paper_dir(paper_id), ignore_errors=True)
+    return {"status": "ok"}
 
 
 @app.post("/papers/{paper_id}/annotations")

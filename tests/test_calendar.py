@@ -158,9 +158,15 @@ def test_calendar_route_defaults_to_current_month_on_malformed_param(isolated_da
     assert response.status_code == 200
 
 
-def test_calendar_nav_link_present_on_index_page(isolated_data_dir):
+def test_calendar_widget_embedded_on_index_page(isolated_data_dir):
+    # plan/07-troubleshooting-backlog.md: a one-line nav link to /calendar
+    # was easy to miss entirely -- the whole widget (grid + creation form)
+    # is now embedded directly on the index page instead.
     html = TestClient(app).get("/").text
-    assert 'href="/calendar"' in html
+    assert 'class="calendar-view"' in html
+    assert 'class="calendar-grid"' in html
+    assert 'id="interpretation-form"' in html
+    assert 'href="/calendar?month=' in html  # month-nav links still work for direct bookmarks
 
 
 def test_calendar_nav_link_is_not_in_the_shared_header(isolated_data_dir):
@@ -169,3 +175,23 @@ def test_calendar_nav_link_is_not_in_the_shared_header(isolated_data_dir):
     html = TestClient(app).get("/calendar").text
     header = html.split("</header>")[0]
     assert "/calendar" not in header
+
+
+def test_interpretation_date_field_defaults_to_today(isolated_data_dir):
+    import datetime as _dt
+
+    html = TestClient(app).get("/calendar").text
+    today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+    assert f'<input type="date" name="date" value="{today}" required />' in html
+
+
+def test_interpretation_paper_picker_has_a_search_input(isolated_data_dir, tmp_path, monkeypatch):
+    from app import pipeline
+    from tests.helpers import blank_pdf, load_golden_tei
+
+    monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: load_golden_tei())
+    pipeline.process_upload("sample.pdf", open(blank_pdf(tmp_path, pages=2), "rb").read())
+
+    html = TestClient(app).get("/calendar").text
+    assert 'data-role="paper-search"' in html
+    assert 'data-role="paper-options"' in html

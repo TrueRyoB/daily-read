@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}{{ paper.title }} — daily-read{% endblock %}
-{% macro annotation_markers(unit) %}{% for aid in unit.annotation_ids or [] %}<button type="button" class="annotation-marker" data-annotation-id="{{ aid }}" aria-label="{{ t('annotation_marker_aria') }}">📝</button>{% endfor %}{% endmacro %}
 {% macro bib_entry(entry, in_panel=True) %}
 {# dom_id must be unique across the whole page: the desktop panel and the
    mobile-only section both render every bibliography entry, and reader.js
@@ -58,15 +57,17 @@
     <p class="reading-meta">
       {{ t('reading_meta', minutes=content.est_minutes, words=content.word_count) }}
     </p>
+    {# plan/07-troubleshooting-backlog.md: a PDF upload's "source" is just
+       its filename, which adds nothing a reader doesn't already know --
+       only worth a line when it's a URL (i.e. traceable back to the
+       original page it came from). #}
+    {% if paper.source.startswith('http') %}
     <p class="reader-source">{{ t('source_prefix', source=paper.source) }}</p>
+    {% endif %}
     {# plan/07-troubleshooting-backlog.md#b-6: only ever unhidden by JS,
        mobile-only, once this paper's page/figures/assets are actually
        confirmed cached -- never shown just because the page loaded. #}
     <p id="offline-ready-indicator" class="offline-ready-indicator" hidden>{{ t('offline_ready_indicator') }}</p>
-    {% if content.glossary %}
-    <p class="glossary-hint">{{ t('glossary_hint') }}</p>
-    {% endif %}
-    <p class="annotation-hint">{{ t('annotation_hint') }}</p>
     {% if content.abstract %}
     <p class="reader-abstract">{{ content.abstract }}</p>
     {% endif %}
@@ -105,11 +106,11 @@
     <div class="reader-body">
       {% for unit in rendered_units %}
         {% if unit.kind == "heading" %}
-          {% if unit.level == 1 %}<h2 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h2>
-          {% elif unit.level == 2 %}<h3 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h3>
-          {% else %}<h4 id="{{ unit.anchor_id }}" class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</h4>{% endif %}
+          {% if unit.level == 1 %}<h2 id="{{ unit.anchor_id }}">{{ unit.html | safe }}</h2>
+          {% elif unit.level == 2 %}<h3 id="{{ unit.anchor_id }}">{{ unit.html | safe }}</h3>
+          {% else %}<h4 id="{{ unit.anchor_id }}">{{ unit.html | safe }}</h4>{% endif %}
         {% elif unit.kind == "paragraph" %}
-          <p class="{{ 'annotated-block' if unit.annotation_ids }}">{{ annotation_markers(unit) }}{{ unit.html | safe }}</p>
+          <p>{{ unit.html | safe }}</p>
         {% endif %}
         {# figure_ref units render nothing now: inline "Figure N" mentions
            in the surrounding prose carry the .figure-jump link instead

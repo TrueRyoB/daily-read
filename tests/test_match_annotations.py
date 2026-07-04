@@ -9,6 +9,13 @@ _UNITS = [
 ]
 
 
+def _ids(matches: dict) -> dict:
+    """Collapses the {unit_index: [{"annotation_id","start","end"}, ...]}
+    shape down to {unit_index: [annotation_id, ...]} for tests that only
+    care about which unit(s) got matched, not the exact character range."""
+    return {idx: [m["annotation_id"] for m in marks] for idx, marks in matches.items()}
+
+
 def test_parse_annotation_note_splits_quotes_from_comment():
     parsed = rendering.parse_annotation_note("> Graph Neural Networks\nthis is my comment\n> also appear")
     assert parsed["quotes"] == ["Graph Neural Networks", "also appear"]
@@ -25,7 +32,16 @@ def test_finds_quoted_line_in_correct_unit():
     annotations = [{"id": 1, "note": "> Graph Neural Networks are widely\nkey term"}]
     matches, matched_ids = rendering.match_annotations(_UNITS, annotations)
     assert matched_ids == {1}
-    assert matches == {1: [1]}  # the first paragraph (index 1), not the second
+    assert _ids(matches) == {1: [1]}  # the first paragraph (index 1), not the second
+
+
+def test_match_reports_the_exact_character_range_of_the_quote():
+    units = [{"kind": "paragraph", "text": "some prefix text then the target phrase and a suffix"}]
+    annotations = [{"id": 1, "note": "> the target phrase"}]
+    matches, _ = rendering.match_annotations(units, annotations)
+    mark = matches[0][0]
+    text = units[0]["text"]
+    assert text[mark["start"] : mark["end"]] == "the target phrase"
 
 
 def test_marks_not_found_when_quote_no_longer_present():
@@ -57,7 +73,7 @@ def test_matches_against_visible_citation_label_not_raw_placeholder():
     annotations = [{"id": 1, "note": "> citation [1] work"}]
     matches, matched_ids = rendering.match_annotations(_UNITS, annotations)
     assert matched_ids == {1}
-    assert matches == {2: [1]}
+    assert _ids(matches) == {2: [1]}
 
 
 def test_annotation_with_no_quote_lines_is_never_matched():
@@ -75,7 +91,7 @@ def test_one_annotation_with_n_quotes_marks_every_matched_unit():
     ]
     matches, matched_ids = rendering.match_annotations(_UNITS, annotations)
     assert matched_ids == {1}
-    assert matches == {1: [1], 2: [1]}
+    assert _ids(matches) == {1: [1], 2: [1]}
 
 
 def test_found_is_true_if_at_least_one_of_n_quotes_matches():
@@ -84,7 +100,10 @@ def test_found_is_true_if_at_least_one_of_n_quotes_matches():
     assert matched_ids == {1}
 
 
-def test_same_annotation_id_not_duplicated_when_two_quotes_hit_the_same_unit():
+def test_two_quotes_of_the_same_annotation_hitting_the_same_unit_both_recorded():
+    # Not deduped -- each is a legitimately distinct character range within
+    # the same unit, so both get their own <mark> at render time.
     annotations = [{"id": 1, "note": "> Graph Neural Networks are widely\n> widely used for relational data"}]
     matches, _ = rendering.match_annotations(_UNITS, annotations)
-    assert matches == {1: [1]}  # not [1, 1]
+    assert _ids(matches) == {1: [1, 1]}
+    assert len(matches[1]) == 2

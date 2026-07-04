@@ -1,0 +1,122 @@
+{# Shared by calendar.html (the standalone /calendar page, kept for direct
+   links/bookmarks) and index.html (plan/07-troubleshooting-backlog.md:
+   the calendar used to be reachable only via a single easy-to-miss nav
+   link on the index page -- embedding the whole widget there directly is
+   what actually makes it discoverable). Both routes pass the same context
+   shape (see main.py's _calendar_context). #}
+<section class="calendar-view">
+  <div class="calendar-nav">
+    <a href="/calendar?month={{ prev_month }}">{{ t('calendar_prev') }}</a>
+    <h2>{{ t('calendar_heading', year=calendar.year, month=calendar.month, month_name=month_name) }}</h2>
+    <a href="/calendar?month={{ next_month }}">{{ t('calendar_next') }}</a>
+  </div>
+
+  {# plan/07-troubleshooting-backlog.md#b-4改訂: logging an "interpretation"
+     is a deliberate act distinct from a paper merely finishing processing
+     -- date defaults to today (plan/07-troubleshooting-backlog.md, later
+     feedback round) but is still free input with no past/future
+     validation (self-contained personal log, never shown to anyone else). #}
+  <details class="interpretation-form-toggle">
+    <summary>{{ t('interpretation_add_button') }}</summary>
+    <form id="interpretation-form" class="interpretation-form">
+      <label class="field">
+        <span>{{ t('interpretation_date_label') }}</span>
+        <input type="date" name="date" value="{{ today_date }}" required />
+      </label>
+
+      {% if papers %}
+      <fieldset class="interpretation-papers">
+        <legend>{{ t('interpretation_papers_label') }}</legend>
+        <input
+          type="search"
+          class="interpretation-paper-search"
+          data-role="paper-search"
+          placeholder="{{ t('interpretation_paper_search_placeholder') }}"
+        />
+        <div class="interpretation-paper-options" data-role="paper-options">
+          {% for paper in papers %}
+          <label class="interpretation-paper-option" data-title="{{ paper.title | lower }}">
+            <input type="checkbox" name="paper_ids" value="{{ paper.id }}" />
+            {{ paper.title }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% endif %}
+
+      <label class="field">
+        <span>{{ t('interpretation_memo_label') }}</span>
+        <textarea name="memo" rows="4" placeholder="{{ t('interpretation_memo_placeholder') }}"></textarea>
+      </label>
+
+      <div class="interpretation-links-field">
+        <span>{{ t('interpretation_links_label') }}</span>
+        <div data-role="interpretation-links">
+          <input type="url" name="links" placeholder="https://..." />
+        </div>
+        <button type="button" data-role="add-link" class="interpretation-add-link">{{ t('interpretation_add_link') }}</button>
+      </div>
+
+      <div class="interpretation-form-actions">
+        <button type="submit">{{ t('interpretation_save') }}</button>
+      </div>
+    </form>
+  </details>
+
+  <table class="calendar-grid">
+    <thead>
+      <tr>
+        {% for weekday in t('calendar_weekdays').split(',') %}
+        <th>{{ weekday }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in calendar.weeks %}
+      <tr>
+        {% for cell in week %}
+        {% if cell is none %}
+        <td class="calendar-cell calendar-cell-empty"></td>
+        {% else %}
+        <td class="calendar-cell{% if cell.entries %} calendar-cell-has-entries{% endif %}"
+            {% if cell.all_entries %}data-role="calendar-day-cell" data-date="{{ cell.date }}"{% endif %}>
+          <span class="calendar-day-number">{{ cell.day }}</span>
+          {% for entry in cell.entries %}
+          <div class="calendar-entry">
+            {% if entry.papers %}
+            <span class="calendar-entry-papers">{{ entry.papers | map(attribute='title') | join(', ') }}</span>
+            {% endif %}
+            {% if entry.memo %}<span class="calendar-entry-memo">{{ entry.memo }}</span>{% endif %}
+          </div>
+          {% endfor %}
+          {% if cell.overflow_count > 0 %}
+          <span class="calendar-overflow-hint">{{ t('interpretation_overflow', count=cell.overflow_count) }}</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<script type="application/json" id="calendar-entries-data">{{ interpretations_json | safe }}</script>
+
+<div id="calendar-day-modal" class="calendar-day-modal" hidden>
+  <div class="calendar-day-modal-backdrop"></div>
+  <div class="calendar-day-modal-content">
+    <button type="button" class="calendar-day-modal-close" aria-label="{{ t('interpretation_day_modal_close') }}">×</button>
+    <h2 data-role="calendar-day-modal-title"></h2>
+    <div data-role="calendar-day-modal-list" class="calendar-day-modal-list"></div>
+  </div>
+</div>
+
+<script>
+  window.__calendarI18n = {
+    noPapers: {{ t('interpretation_no_papers') | tojson }},
+    deleteLabel: {{ t('interpretation_delete') | tojson }},
+    deleteConfirm: {{ t('interpretation_delete_confirm') | tojson }}
+  };
+</script>
+<script src="/static/calendar.js"></script>

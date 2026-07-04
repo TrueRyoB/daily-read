@@ -21,12 +21,23 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
   }
 
   function renderPopover(entry) {
+    if (entry.source === "concordance") {
+      // plan/07-troubleshooting-backlog.md: this term never had a real
+      // definition -- only usage examples -- so promising "click to see
+      // its meaning" (the same as a genuinely defined term) was
+      // misleading. Offer just the one honest action: dismiss it as
+      // already known.
+      popover.innerHTML =
+        `<button type="button" class="gp-close" aria-label="${I18N.gp_close_aria}">×</button>` +
+        `<span class="gp-term">${escapeHtml(entry.term)}</span>` +
+        `<button type="button" class="gp-know" data-term="${escapeHtml(entry.term)}">${I18N.gp_know}</button>`;
+      return;
+    }
     const contexts = (entry.contexts || []).map((c) => `<li>${escapeHtml(c)}</li>`).join("");
     const definitionHtml = entry.definition
       ? `<span class="gp-def">${escapeHtml(entry.definition)}</span>`
       : "";
     const sourceLabels = {
-      concordance: I18N.gp_source_concordance,
       bundled_dictionary: I18N.gp_source_bundled,
       in_text_definition: I18N.gp_source_intext,
     };
@@ -293,15 +304,14 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
   function jumpToText(annotationId) {
     // Body -> panel is jumpToAnnotation above; this is the reverse
     // (panel -> body). With N quotes per annotation there can be multiple
-    // markers sharing the same id -- querySelector's first-in-document-
-    // order match is the same "first occurrence wins" convention already
-    // used server-side (rendering.match_annotations).
-    const marker = document.querySelector(`.annotation-marker[data-annotation-id="${annotationId}"]`);
-    const block = marker ? marker.closest(".annotated-block") : null;
-    if (!block) return;
-    block.scrollIntoView({ behavior: "smooth", block: "center" });
-    block.classList.add("annotation-flash");
-    setTimeout(() => block.classList.remove("annotation-flash"), 1500);
+    // highlighted spans sharing the same id -- querySelector's first-in-
+    // document-order match is the same "first occurrence wins" convention
+    // already used server-side (rendering.match_annotations).
+    const highlight = document.querySelector(`mark.annotation-highlight[data-annotation-id="${annotationId}"]`);
+    if (!highlight) return;
+    highlight.scrollIntoView({ behavior: "smooth", block: "center" });
+    highlight.classList.add("annotation-flash");
+    setTimeout(() => highlight.classList.remove("annotation-flash"), 1500);
   }
 
   function toggleEdit(li) {
@@ -340,9 +350,14 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
   }
 
   document.addEventListener("click", (event) => {
-    const marker = event.target.closest(".annotation-marker");
-    if (marker) {
-      jumpToAnnotation(marker.dataset.annotationId);
+    // A highlighted quote can itself contain a nested .gloss/.citation/
+    // .figure-jump element (e.g. a quote that happens to span a glossary
+    // term) -- when the click lands on one of those, let its own
+    // more-specific handler (in an earlier IIFE) win instead of also
+    // jumping to the annotation panel.
+    const highlight = event.target.closest(".annotation-highlight");
+    if (highlight && !event.target.closest(".gloss, .citation, .figure-jump, .figure-card")) {
+      jumpToAnnotation(highlight.dataset.annotationId);
       event.stopPropagation();
       return;
     }

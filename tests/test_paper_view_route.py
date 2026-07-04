@@ -288,8 +288,12 @@ def test_preread_section_lists_frequent_undefined_terms(isolated_data_dir, tmp_p
     assert "preread-terms" in html
     assert "Random Forest" in html
     assert 'data-term="Random Forest"' in html  # the "知っている" button target
-    # Still also present inline for in-reading context recall (04-c: both coexist).
-    assert 'class="gloss" data-term="Random Forest"' in html
+    # Still also present inline for in-reading context recall (04-c: both
+    # coexist), but visually flagged "gloss-unconfirmed" (plan/07-
+    # troubleshooting-backlog.md): it never got a real definition, so it
+    # shouldn't share the accent-colored underline of a genuinely defined
+    # term.
+    assert 'class="gloss gloss-unconfirmed" data-term="Random Forest"' in html
 
 
 def test_preread_search_link_includes_paper_title_as_context(isolated_data_dir, tmp_path, monkeypatch):

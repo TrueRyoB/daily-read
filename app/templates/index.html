@@ -17,24 +17,35 @@
   </form>
 </section>
 
-<p class="calendar-nav-link-wrapper">
-  <a class="calendar-nav-link" href="/calendar">{{ t('calendar_nav_label') }}</a>
-</p>
+{# plan/07-troubleshooting-backlog.md: the calendar used to be reachable
+   only via one easy-to-miss nav link here -- embedding the whole widget
+   (grid + creation form) directly on the index page is what actually
+   makes it discoverable. /calendar itself still exists for direct
+   links/bookmarks (see _calendar_widget.html's own month-nav links). #}
+{% include "_calendar_widget.html" %}
 
 <section class="history">
   <h2>{{ t('history_heading') }}</h2>
   {% if papers %}
   <ul class="paper-list">
     {% for paper in papers %}
-    <li class="paper-list-item">
+    <li class="paper-list-item" data-paper-id="{{ paper.id }}">
       <a href="/papers/{{ paper.id }}">{{ paper.title }}</a>
-      {% if paper.status == "processing" %}
-      <span class="paper-meta">{{ t('status_processing') }} ・ {{ paper.created_at[:10] }}</span>
-      {% elif paper.status == "error" %}
-      <span class="paper-meta">{{ t('status_error') }} ・ {{ paper.created_at[:10] }}</span>
-      {% else %}
-      <span class="paper-meta">{{ t('reading_time_meta', minutes=paper.est_minutes) }} ・ {{ paper.created_at[:10] }}</span>
-      {% endif %}
+      <span class="paper-list-item-right">
+        {% if paper.status == "processing" %}
+        <span class="paper-meta">{{ t('status_processing') }} ・ {{ paper.created_at[:10] }}</span>
+        {% elif paper.status == "error" %}
+        <span class="paper-meta">{{ t('status_error') }} ・ {{ paper.created_at[:10] }}</span>
+        {% else %}
+        <span class="paper-meta">{{ t('reading_time_meta', minutes=paper.est_minutes) }} ・ {{ paper.created_at[:10] }}</span>
+        {% endif %}
+        {# plan/07-troubleshooting-backlog.md: no way to reclaim storage
+           from old papers previously -- hidden while still processing so
+           a reader can't delete out from under the background thread. #}
+        {% if paper.status != "processing" %}
+        <button type="button" class="paper-delete-btn" data-paper-id="{{ paper.id }}" aria-label="{{ t('delete') }}">✕</button>
+        {% endif %}
+      </span>
     </li>
     {% endfor %}
   </ul>
@@ -42,4 +53,11 @@
   <p class="empty-state">{{ t('empty_state') }}</p>
   {% endif %}
 </section>
+
+<script>
+  window.__indexI18n = {
+    deleteConfirm: {{ t('paper_delete_confirm') | tojson }}
+  };
+</script>
+<script src="/static/index.js"></script>
 {% endblock %}

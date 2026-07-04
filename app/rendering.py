@@ -31,30 +31,54 @@ def filter_known_terms(glossary: list[dict], known_term_keys: set[str]) -> list[
     return [e for e in glossary if normalize_term_key(e["term"]) not in known_term_keys]
 
 
-def render_units(units: list[dict], glossary: list[dict], bibliography: list[dict] | None = None) -> list[dict]:
-    """Attach glossary-annotated `html` to paragraph/heading units, and a
-    stable `anchor_id` (e.g. "heading-3") to heading units so both the
-    heading itself and a table-of-contents entry pointing at it (plan/03-e)
-    agree on the same id.
+def render_units(
+    units: list[dict],
+    glossary: list[dict],
+    bibliography: list[dict] | None = None,
+    annotations: list[dict] | None = None,
+) -> tuple[list[dict], set[int]]:
+    """Attach glossary/citation/annotation-highlight-annotated `html` to
+    paragraph/heading units, and a stable `anchor_id` (e.g. "heading-3") to
+    heading units so both the heading itself and a table-of-contents entry
+    pointing at it (plan/03-e) agree on the same id.
 
     figure_ref units pass through unchanged; the template resolves them
     against the figures list separately. `bibliography` is optional so old
     content.json (from before plan/03-c) without a "bibliography" key still
     renders -- citations just won't be linked for those.
+
+    `annotations` is matched here (not in a separate template-side pass)
+    so each matched quote's `<mark>` highlight can be embedded directly
+    into `unit["html"]` at its exact character range -- plan/07-
+    troubleshooting-backlog.md moved away from a block-level 📝 marker
+    button because it wasn't clear what it meant and wasn't findable via
+    in-page search; the highlighted text itself is now both the visual cue
+    and the click target.
+
+    Returns (rendered_units, matched_annotation_ids); the caller uses the
+    latter to flag each annotation "found"/"not found" in the panel.
     """
     bib_by_id = {b["bib_id"]: b for b in (bibliography or [])}
-    annotate = _build_annotator([entry["term"] for entry in glossary], bib_by_id)
+    mark_ranges, matched_ids = match_annotations(units, annotations or [])
+    # "concordance" terms never got a real definition -- only usage
+    # examples -- so they're flagged for a visually distinct underline and
+    # a simplified "I know this"-only popover (plan/07-troubleshooting-
+    # backlog.md), instead of implying a definition is one click away.
+    concordance_terms = {e["term"] for e in glossary if e.get("source") == "concordance"}
+    annotate = _build_annotator([entry["term"] for entry in glossary], bib_by_id, concordance_terms)
     rendered = []
     heading_count = 0
-    for unit in units:
+    for i, unit in enumerate(units):
         if unit["kind"] == "figure_ref":
             rendered.append(unit)
-        elif unit["kind"] == "heading":
+            continue
+        html_out = annotate(unit["text"], mark_ranges.get(i, []))
+        if unit["kind"] == "heading":
             heading_count += 1
-            rendered.append({**unit, "html": annotate(unit["text"]), "anchor_id": f"heading-{heading_count}"})
+            rendered.append({**unit, "html": html_out, "anchor_id": f"heading-{heading_count}"})
         else:
-            rendered.append({**unit, "html": annotate(unit["text"])})
-    return rendered
+            rendered.append({**unit, "html": html_out})
+    return rendered, matched_ids
 
 
 def table_of_contents(rendered_units: list[dict]) -> list[dict]:
@@ -137,13 +161,13 @@ def parse_annotation_note(note: str) -> dict:
     return {"quotes": quotes, "comment": "\n".join(comment_lines)}
 
 
-def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[int, list[int]], set[int]]:
+def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[int, list[dict]], set[int]]:
     """Re-find each saved annotation's quote(s) against the *current* units
-    (plan/05-g, extended to N quotes per annotation by plan/07-
-    troubleshooting-backlog.md#07-aフル対応) -- annotations live in
-    SQLite, independent of content.json, so a paper reprocess (which can
-    change unit wording) must degrade gracefully instead of crashing or
-    silently losing notes.
+    (plan/05-g, extended to N quotes per annotation and exact character
+    ranges by plan/07-troubleshooting-backlog.md#07-aフル対応) --
+    annotations live in SQLite, independent of content.json, so a paper
+    reprocess (which can change unit wording) must degrade gracefully
+    instead of crashing or silently losing notes.
 
     Each of an annotation's quotes is matched independently (loose
     substring match only -- there's no captured prefix/suffix context for
@@ -153,34 +177,42 @@ def match_annotations(units: list[dict], annotations: list[dict]) -> tuple[dict[
     "found" if at least one of its quotes matched anywhere (v1: no
     per-quote found/not-found granularity).
 
-    Returns ({unit_index: [annotation_id, ...]}, {matched_annotation_id}).
-    Unmatched annotations are simply absent from both -- callers should
-    treat "not in matched ids" as "flag as not-found," not an error.
+    Returns ({unit_index: [{"annotation_id", "start", "end"}, ...]},
+    {matched_annotation_id}). start/end are character offsets into that
+    unit's `_visible_text` -- render_units uses them to wrap the exact
+    matched substring in a `<mark>` rather than just flagging the whole
+    block. Unmatched annotations are simply absent from both -- callers
+    should treat "not in matched ids" as "flag as not-found," not an
+    error.
     """
     unit_texts = [
         _visible_text(u.get("text", "")) if u["kind"] in ("heading", "paragraph") else None for u in units
     ]
-    matches: dict[int, list[int]] = {}
+    matches: dict[int, list[dict]] = {}
     matched_ids: set[int] = set()
 
     for ann in annotations:
         quotes = parse_annotation_note(ann.get("note") or "")["quotes"]
         for quote in quotes:
-            found_index = _find_unit_index(unit_texts, quote)
-            if found_index is None:
+            if not quote:
                 continue
-            ids_here = matches.setdefault(found_index, [])
-            if ann["id"] not in ids_here:
-                ids_here.append(ann["id"])
+            found = _find_quote_position(unit_texts, quote)
+            if found is None:
+                continue
+            unit_index, start, end = found
+            matches.setdefault(unit_index, []).append({"annotation_id": ann["id"], "start": start, "end": end})
             matched_ids.add(ann["id"])
 
     return matches, matched_ids
 
 
-def _find_unit_index(unit_texts: list[str | None], needle: str) -> int | None:
+def _find_quote_position(unit_texts: list[str | None], needle: str) -> tuple[int, int, int] | None:
     for idx, text in enumerate(unit_texts):
-        if text is not None and needle in text:
-            return idx
+        if text is None:
+            continue
+        pos = text.find(needle)
+        if pos != -1:
+            return idx, pos, pos + len(needle)
     return None
 
 
@@ -246,48 +278,197 @@ def _coarse_title_context(paper_title: str) -> str:
     return " ".join(paper_title.split()[:_TITLE_CONTEXT_MAX_WORDS])
 
 
-def _build_annotator(terms: list[str], bib_by_id: dict[str, dict]):
-    unique_terms = sorted({html.escape(t) for t in terms if t}, key=len, reverse=True)
+# Combined citation/figure-mention placeholder matcher (see
+# app/models.py's CITATION_PLACEHOLDER_RE/FIGURE_MENTION_PLACEHOLDER_RE for
+# the wire format itself) -- used here as a single-pass tokenizer step, not
+# a substitution, so each placeholder becomes exactly one indivisible atom
+# rather than a regex replacement applied to an already-escaped string.
+_PLACEHOLDER_ATOM_RE = re.compile(
+    r"\x00CITE:(?P<cite_id>[^\x00]+)\x00(?P<cite_label>.*?)\x00/CITE\x00"
+    r"|\x00FIGREF:(?P<fig_id>[^\x00]+)\x00(?P<fig_label>.*?)\x00/FIGREF\x00",
+    re.DOTALL,
+)
+
+
+def _tokenize_plain(text: str, gloss_pattern: re.Pattern | None) -> list[dict]:
+    """Splits a placeholder-free text span into single-character atoms,
+    except for glossary-term matches, which are kept as one indivisible
+    atom each -- a <mark> boundary must never fall inside one (see
+    _snap_marks_to_atoms)."""
+    atoms = []
+    pos = 0
+    if gloss_pattern is not None:
+        for m in gloss_pattern.finditer(text):
+            atoms.extend({"kind": "char", "text": ch} for ch in text[pos : m.start()])
+            atoms.append({"kind": "gloss", "term": m.group(1)})
+            pos = m.end()
+    atoms.extend({"kind": "char", "text": ch} for ch in text[pos:])
+    return atoms
+
+
+def _tokenize_unit_text(text: str, gloss_pattern: re.Pattern | None) -> list[dict]:
+    """Breaks a unit's raw text (still containing NUL-delimited citation/
+    figure-mention placeholders, plan/03-c/05-b) into an ordered list of
+    "visible atoms": each is either one plain character, or an indivisible
+    span (a glossary term match, or a resolved citation/figure-mention
+    label). Exact-substring annotation highlighting (plan/07-
+    troubleshooting-backlog.md) was previously rejected specifically
+    because a saved quote's character range could start or end in the
+    middle of one of these already-tag-producing spans, and naively
+    wrapping it in `<mark>` would split that tag in half (invalid HTML).
+    Tokenizing first -- so mark boundaries can be snapped to atom
+    boundaries instead -- is what makes it safe.
+    """
+    atoms = []
+    pos = 0
+    for m in _PLACEHOLDER_ATOM_RE.finditer(text):
+        atoms.extend(_tokenize_plain(text[pos : m.start()], gloss_pattern))
+        if m.group("cite_id") is not None:
+            atoms.append({"kind": "citation", "bib_id": m.group("cite_id"), "label": m.group("cite_label")})
+        else:
+            atoms.append({"kind": "figref", "figure_id": m.group("fig_id"), "label": m.group("fig_label")})
+        pos = m.end()
+    atoms.extend(_tokenize_plain(text[pos:], gloss_pattern))
+    return atoms
+
+
+def _atom_visible_text(atom: dict) -> str:
+    return atom.get("text") or atom.get("term") or atom.get("label") or ""
+
+
+def _atom_offsets(atoms: list[dict]) -> list[int]:
+    """offsets[i] is atoms[i]'s start position in the unit's visible text;
+    offsets[-1] is the total visible length."""
+    offsets = [0]
+    for atom in atoms:
+        offsets.append(offsets[-1] + len(_atom_visible_text(atom)))
+    return offsets
+
+
+def _snap_marks_to_atoms(atoms: list[dict], offsets: list[int], marks: list[dict]) -> list[dict]:
+    """A mark's (start, end) is a plain character offset into the unit's
+    visible text (rendering._visible_text), computed with no notion of the
+    indivisible atoms it will actually be rendered around. If a boundary
+    falls in the middle of one, extend it outward to that atom's edge --
+    the alternative (splitting the atom's own generated tag in half) would
+    produce broken markup."""
+    snapped = []
+    for mark in marks:
+        start, end = mark["start"], mark["end"]
+        for i, atom in enumerate(atoms):
+            if atom["kind"] == "char":
+                continue
+            atom_start, atom_end = offsets[i], offsets[i + 1]
+            if atom_start < start < atom_end:
+                start = atom_start
+            if atom_start < end < atom_end:
+                end = atom_end
+        snapped.append({**mark, "start": start, "end": end})
+    return snapped
+
+
+def _render_atom(atom: dict, bib_by_id: dict[str, dict], concordance_terms: set[str]) -> str:
+    if atom["kind"] == "char":
+        return html.escape(atom["text"])
+    if atom["kind"] == "gloss":
+        term = html.escape(atom["term"])
+        css_class = "gloss gloss-unconfirmed" if atom["term"] in concordance_terms else "gloss"
+        return f'<span class="{css_class}" data-term="{term}" tabindex="0">{term}</span>'
+    if atom["kind"] == "citation":
+        return _citation_link(atom, bib_by_id)
+    return _figure_mention_link(atom)
+
+
+def _render_atoms_with_marks(
+    atoms: list[dict],
+    offsets: list[int],
+    marks: list[dict],
+    bib_by_id: dict[str, dict],
+    concordance_terms: set[str],
+) -> str:
+    """Walks the atom stream once, opening/closing `<mark>` tags for each
+    annotation's (already atom-boundary-snapped) quote range as it goes.
+    Marks are never split mid-atom (see _snap_marks_to_atoms above); if two
+    marks' ranges genuinely overlap (two different comments quoting
+    overlapping text -- rare, not prevented), the outer one is closed and
+    reopened around the inner one so tags stay properly nested."""
+    for i, mark in enumerate(marks):
+        mark["_seq"] = i
+    opens: dict[int, list[dict]] = {}
+    closes: dict[int, list[dict]] = {}
+    for mark in marks:
+        opens.setdefault(mark["start"], []).append(mark)
+        closes.setdefault(mark["end"], []).append(mark)
+
+    parts: list[str] = []
+    open_stack: list[dict] = []
+
+    def close_through(mark: dict) -> None:
+        idx = next(i for i, m in enumerate(open_stack) if m["_seq"] == mark["_seq"])
+        to_reopen = open_stack[idx + 1 :]
+        for _ in open_stack[idx:]:
+            parts.append("</mark>")
+        del open_stack[idx:]
+        for reopen in to_reopen:
+            parts.append(f'<mark class="annotation-highlight" data-annotation-id="{reopen["annotation_id"]}">')
+            open_stack.append(reopen)
+
+    for i, atom in enumerate(atoms):
+        pos = offsets[i]
+        for mark in closes.get(pos, []):
+            if any(m["_seq"] == mark["_seq"] for m in open_stack):
+                close_through(mark)
+        for mark in opens.get(pos, []):
+            parts.append(f'<mark class="annotation-highlight" data-annotation-id="{mark["annotation_id"]}">')
+            open_stack.append(mark)
+        parts.append(_render_atom(atom, bib_by_id, concordance_terms))
+
+    end_pos = offsets[-1]
+    for mark in closes.get(end_pos, []):
+        if any(m["_seq"] == mark["_seq"] for m in open_stack):
+            close_through(mark)
+    for _ in open_stack:
+        parts.append("</mark>")
+
+    return "".join(parts)
+
+
+def _build_annotator(terms: list[str], bib_by_id: dict[str, dict], concordance_terms: set[str] | None = None):
+    unique_terms = sorted({t for t in terms if t}, key=len, reverse=True)
     pattern = (
         re.compile(r"\b(" + "|".join(re.escape(t) for t in unique_terms) + r")\b")
         if unique_terms
         else None
     )
+    concordance_terms = concordance_terms or set()
 
-    def annotate(text: str) -> str:
-        escaped = html.escape(text)
-        if pattern is not None:
-            escaped = pattern.sub(
-                lambda m: f'<span class="gloss" data-term="{m.group(1)}" tabindex="0">{m.group(1)}</span>',
-                escaped,
-            )
-        # Placeholders are substituted last, after escaping/glossary
-        # annotation, so their embedded NUL-byte delimiters never have to
-        # survive intermediate regex passes.
-        escaped = CITATION_PLACEHOLDER_RE.sub(lambda m: _citation_link(m, bib_by_id), escaped)
-        return FIGURE_MENTION_PLACEHOLDER_RE.sub(_figure_mention_link, escaped)
+    def annotate(text: str, marks: list[dict] | None = None) -> str:
+        atoms = _tokenize_unit_text(text, pattern)
+        offsets = _atom_offsets(atoms)
+        snapped = _snap_marks_to_atoms(atoms, offsets, marks or [])
+        return _render_atoms_with_marks(atoms, offsets, snapped, bib_by_id, concordance_terms)
 
     return annotate
 
 
-def _citation_link(match: re.Match, bib_by_id: dict[str, dict]) -> str:
-    # match.group(1) is usually one bib_id, but plan/05-a merges GROBID's
-    # split combined citations ("[1, 16]") into one placeholder carrying
-    # multiple comma-joined ids -- the first one is used as the single
+def _citation_link(atom: dict, bib_by_id: dict[str, dict]) -> str:
+    # atom["bib_id"] is usually one id, but plan/05-a merges GROBID's split
+    # combined citations ("[1, 16]") into one placeholder carrying multiple
+    # comma-joined ids -- the first one is used as the single
     # representative link target (one <a> can only point at one place).
-    bib_id = match.group(1).split(",")[0]
-    label = match.group(2)
+    bib_id = atom["bib_id"].split(",")[0]
+    label = html.escape(atom["label"])
     entry = bib_by_id.get(bib_id)
     href = entry["url"] if entry and entry.get("url") else f"#bib-{bib_id}"
     return f'<a class="citation" href="{html.escape(href, quote=True)}">{label}</a>'
 
 
-def _figure_mention_link(match: re.Match) -> str:
+def _figure_mention_link(atom: dict) -> str:
     # Reuses the .figure-jump class/click-handler (reader.js) that already
     # drives the desktop panel-scroll / mobile-modal behavior -- plan/05-b
     # removed the old manually-inserted "figure-jump" button, so this
     # inline mention is now the only place that class is emitted from.
-    figure_id, label = match.group(1), match.group(2)
+    figure_id, label = atom["figure_id"], html.escape(atom["label"])
     return f'<a class="figure-jump" href="#{html.escape(figure_id, quote=True)}">{label}</a>'
 
 

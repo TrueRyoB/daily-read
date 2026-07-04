@@ -40,7 +40,9 @@ def test_create_annotation_then_reload_shows_marker_and_panel_entry(isolated_dat
     assert 'class="annotations-section"' in html
     assert "key idea" in html
     assert f'data-annotation-id="{annotation["id"]}"' in html
-    assert 'class="annotation-marker"' in html
+    # plan/07-troubleshooting-backlog.md: exact-substring colored underline,
+    # not a block-level 📝 marker button.
+    assert 'class="annotation-highlight"' in html
 
 
 def test_editing_annotation_updates_note_text(isolated_data_dir, tmp_path, monkeypatch):
@@ -104,7 +106,7 @@ def test_annotation_survives_reprocessing_but_is_flagged_not_found(isolated_data
     assert "surviving note" in html  # note text itself still shown in the panel
     assert "本文中に見つかりません" in html
     assert f'data-annotation-id="{created["id"]}"' in html
-    assert 'class="annotation-marker"' not in html  # no block matched, so no marker rendered
+    assert 'class="annotation-highlight"' not in html  # nothing matched, so no highlight rendered
 
 
 def test_create_annotation_404_for_nonexistent_paper(isolated_data_dir):
