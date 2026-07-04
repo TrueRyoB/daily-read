@@ -166,6 +166,19 @@ def annotations_json(annotations: list[dict]) -> str:
     return json.dumps(annotations, ensure_ascii=False)
 
 
+def interpretations_json(interpretations: list[dict]) -> str:
+    """Serialize this month's interpretation-log entries, grouped by date,
+    for calendar.js's day-detail modal (plan/07-troubleshooting-
+    backlog.md#b-4改訂) -- the calendar cell itself only shows a capped,
+    compact preview (see build_calendar_month); the modal needs the full
+    list (including links, which don't fit inline) for any day that has
+    entries."""
+    by_date: dict[str, list[dict]] = {}
+    for entry in interpretations:
+        by_date.setdefault(entry["date"], []).append(entry)
+    return json.dumps(by_date, ensure_ascii=False)
+
+
 _TITLE_CONTEXT_MAX_WORDS = 6
 _TITLE_CLAUSE_SEPARATORS = (":", " — ", " – ", " - ")
 
@@ -251,19 +264,31 @@ def _figure_mention_link(match: re.Match) -> str:
     return f'<a class="figure-jump" href="#{html.escape(figure_id, quote=True)}">{label}</a>'
 
 
-def build_calendar_month(papers: list[dict], year: int, month: int) -> dict:
-    """Group papers by the date portion of `created_at` into a month-grid
-    structure for calendar.html (plan/07-troubleshooting-backlog.md#b-4).
-    Pure function so the grid layout itself is testable without going
-    through the HTTP route.
+_CALENDAR_CELL_ENTRY_LIMIT = 3
+
+
+def build_calendar_month(interpretations: list[dict], year: int, month: int) -> dict:
+    """Group interpretation-log entries by their own `date` field into a
+    month-grid structure for calendar.html (plan/07-troubleshooting-
+    backlog.md#b-4改訂). Pure function so the grid layout itself is
+    testable without going through the HTTP route.
+
+    Deliberately keyed by when the reader logged an interpretation, not by
+    when a paper finished processing (`papers.created_at`, the original
+    plan/07#b-4 design): parsing a PDF isn't the same as having read or
+    understood it -- see the plan doc for the full discussion.
 
     Sunday-first weeks (calendar.Calendar(firstweekday=6)); a day outside
     the requested month is represented as None so the template can render
-    an empty cell for it.
+    an empty cell for it. Each day cell caps the entries shown directly
+    (`_CALENDAR_CELL_ENTRY_LIMIT`) and reports how many more exist via
+    `overflow_count`, so a busy day (real data: 12 items in one day) can't
+    silently blow out the cell's layout -- the template surfaces the rest
+    via a "+N" indicator instead of clipping them invisibly.
     """
-    papers_by_date: dict[str, list[dict]] = {}
-    for paper in papers:
-        papers_by_date.setdefault(paper["created_at"][:10], []).append(paper)
+    entries_by_date: dict[str, list[dict]] = {}
+    for entry in interpretations:
+        entries_by_date.setdefault(entry["date"], []).append(entry)
 
     weeks = []
     for week in _calendar_module.Calendar(firstweekday=6).monthdayscalendar(year, month):
@@ -273,7 +298,16 @@ def build_calendar_month(papers: list[dict], year: int, month: int) -> dict:
                 cells.append(None)
                 continue
             date_key = f"{year:04d}-{month:02d}-{day:02d}"
-            cells.append({"day": day, "date": date_key, "papers": papers_by_date.get(date_key, [])})
+            day_entries = entries_by_date.get(date_key, [])
+            cells.append(
+                {
+                    "day": day,
+                    "date": date_key,
+                    "entries": day_entries[:_CALENDAR_CELL_ENTRY_LIMIT],
+                    "all_entries": day_entries,
+                    "overflow_count": max(0, len(day_entries) - _CALENDAR_CELL_ENTRY_LIMIT),
+                }
+            )
         weeks.append(cells)
 
     return {"year": year, "month": month, "weeks": weeks}

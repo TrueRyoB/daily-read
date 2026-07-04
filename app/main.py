@@ -67,9 +67,11 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get("/calendar", response_class=HTMLResponse)
 def calendar_view(request: Request, month: str | None = None) -> HTMLResponse:
-    """Papers grouped by the date they were added, calendar-grid style
-    (plan/07-troubleshooting-backlog.md#b-4). `?month=YYYY-MM` navigates;
-    defaults to the current month."""
+    """Interpretation-log entries grouped by the date the reader logged
+    them, calendar-grid style (plan/07-troubleshooting-backlog.md#b-4改訂).
+    Deliberately keyed by `interpretations.date`, not `papers.created_at`:
+    parsing a PDF isn't the same as having read/understood it. `?month=
+    YYYY-MM` navigates; defaults to the current month."""
     now = datetime.now(timezone.utc)
     year, month_num = now.year, now.month
     if month:
@@ -80,11 +82,12 @@ def calendar_view(request: Request, month: str | None = None) -> HTMLResponse:
 
     conn = db.get_connection()
     try:
+        interpretations = db.list_interpretations_in_month(conn, year, month_num)
         papers = db.list_papers(conn)
     finally:
         conn.close()
 
-    calendar_data = rendering.build_calendar_month(papers, year, month_num)
+    calendar_data = rendering.build_calendar_month(interpretations, year, month_num)
     prev_year, prev_month = (year - 1, 12) if month_num == 1 else (year, month_num - 1)
     next_year, next_month = (year + 1, 1) if month_num == 12 else (year, month_num + 1)
 
@@ -96,8 +99,46 @@ def calendar_view(request: Request, month: str | None = None) -> HTMLResponse:
             "month_name": _calendar_module.month_name[month_num],
             "prev_month": f"{prev_year:04d}-{prev_month:02d}",
             "next_month": f"{next_year:04d}-{next_month:02d}",
+            "papers": papers,  # populates the "related papers" picker in the create form
+            "interpretations_json": rendering.interpretations_json(interpretations),
         },
     )
+
+
+@app.post("/interpretations")
+def create_interpretation(
+    date: str = Body(..., embed=True),
+    memo: str = Body("", embed=True),
+    paper_ids: list[str] = Body([], embed=True),
+    links: list[str] = Body([], embed=True),
+) -> dict:
+    """A reading/interpretation log entry (plan/07-troubleshooting-
+    backlog.md#b-4改訂). `date` is free-form user input, deliberately
+    never validated against "today" or any range: this is a self-
+    contained personal log, not something shown to anyone else. A "just
+    musings" entry with zero papers attached is explicitly allowed."""
+    if not date.strip():
+        raise HTTPException(status_code=400, detail="dateは必須です。")
+    cleaned_links = [link.strip() for link in links if link.strip()]
+    conn = db.get_connection()
+    try:
+        return db.create_interpretation(
+            conn, date=date.strip(), memo=memo.strip(), paper_ids=paper_ids, links=cleaned_links
+        )
+    finally:
+        conn.close()
+
+
+@app.delete("/interpretations/{interpretation_id}")
+def remove_interpretation(interpretation_id: int) -> dict:
+    conn = db.get_connection()
+    try:
+        deleted = db.delete_interpretation(conn, interpretation_id)
+    finally:
+        conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    return {"status": "ok"}
 
 
 @app.post("/papers")

@@ -42,7 +42,31 @@ CREATE TABLE IF NOT EXISTS annotations (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_annotations_paper_id ON annotations(paper_id)
+CREATE INDEX IF NOT EXISTS idx_annotations_paper_id ON annotations(paper_id);
+
+CREATE TABLE IF NOT EXISTS interpretations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    memo TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS interpretation_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    interpretation_id INTEGER NOT NULL,
+    url TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS interpretation_papers (
+    interpretation_id INTEGER NOT NULL,
+    paper_id TEXT NOT NULL,
+    PRIMARY KEY (interpretation_id, paper_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_interpretations_date ON interpretations(date);
+CREATE INDEX IF NOT EXISTS idx_interpretation_links_interpretation_id ON interpretation_links(interpretation_id);
+CREATE INDEX IF NOT EXISTS idx_interpretation_papers_interpretation_id ON interpretation_papers(interpretation_id)
 """
 
 
@@ -213,3 +237,78 @@ def delete_annotation(conn: sqlite3.Connection, annotation_id: int, paper_id: st
     cursor = conn.execute("DELETE FROM annotations WHERE id = ? AND paper_id = ?", (annotation_id, paper_id))
     conn.commit()
     return cursor.rowcount > 0
+
+
+def create_interpretation(
+    conn: sqlite3.Connection, *, date: str, memo: str, paper_ids: list[str], links: list[str]
+) -> dict:
+    """A reading/interpretation log entry (plan/07-troubleshooting-
+    backlog.md#b-4改訂): calendar/history should track when the reader
+    actually formed a thought about a paper, not when GROBID happened to
+    finish parsing it. `date` is free-form user input -- deliberately
+    never validated against "today" or any range, since this is a
+    self-contained personal log, not something shown to anyone else.
+    paper_ids may be empty (a "just musings" entry with no paper
+    attached, explicitly allowed)."""
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        "INSERT INTO interpretations (date, memo, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (date, memo, now, now),
+    )
+    interpretation_id = cursor.lastrowid
+    for paper_id in paper_ids:
+        conn.execute(
+            "INSERT INTO interpretation_papers (interpretation_id, paper_id) VALUES (?, ?)",
+            (interpretation_id, paper_id),
+        )
+    for url in links:
+        conn.execute(
+            "INSERT INTO interpretation_links (interpretation_id, url) VALUES (?, ?)",
+            (interpretation_id, url),
+        )
+    conn.commit()
+    return get_interpretation(conn, interpretation_id)
+
+
+def get_interpretation(conn: sqlite3.Connection, interpretation_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM interpretations WHERE id = ?", (interpretation_id,)).fetchone()
+    if row is None:
+        return None
+    return _hydrate_interpretation(conn, dict(row))
+
+
+def list_interpretations_in_month(conn: sqlite3.Connection, year: int, month: int) -> list[dict]:
+    """`date` is a free-text "YYYY-MM-DD" string (never validated), so a
+    LIKE prefix match on "YYYY-MM" is enough -- no need to parse it as a
+    real date."""
+    prefix = f"{year:04d}-{month:02d}"
+    rows = conn.execute(
+        "SELECT * FROM interpretations WHERE date LIKE ? ORDER BY date ASC, id ASC", (f"{prefix}%",)
+    ).fetchall()
+    return [_hydrate_interpretation(conn, dict(row)) for row in rows]
+
+
+def delete_interpretation(conn: sqlite3.Connection, interpretation_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM interpretations WHERE id = ?", (interpretation_id,))
+    conn.execute("DELETE FROM interpretation_links WHERE interpretation_id = ?", (interpretation_id,))
+    conn.execute("DELETE FROM interpretation_papers WHERE interpretation_id = ?", (interpretation_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def _hydrate_interpretation(conn: sqlite3.Connection, interpretation: dict) -> dict:
+    """Attaches the linked papers (id + title, via a join so a paper
+    renamed/reprocessed later still shows its current title) and URLs."""
+    interpretation_id = interpretation["id"]
+    papers = conn.execute(
+        "SELECT papers.id, papers.title FROM interpretation_papers "
+        "JOIN papers ON papers.id = interpretation_papers.paper_id "
+        "WHERE interpretation_papers.interpretation_id = ?",
+        (interpretation_id,),
+    ).fetchall()
+    links = conn.execute(
+        "SELECT url FROM interpretation_links WHERE interpretation_id = ? ORDER BY id ASC", (interpretation_id,)
+    ).fetchall()
+    interpretation["papers"] = [dict(p) for p in papers]
+    interpretation["links"] = [link["url"] for link in links]
+    return interpretation

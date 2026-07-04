@@ -10,7 +10,10 @@
   <header class="site-header">
     <a class="site-title" href="/">daily-read</a>
     <span class="site-tagline">{{ t('tagline') }}</span>
-    <a class="calendar-nav-link" href="/calendar">{{ t('calendar_nav_label') }}</a>
+    {# plan/07-troubleshooting-backlog.md#b-4改訂: the calendar link used to
+       live here purely out of "nav links go in the header" convention, not
+       because it fit this app's actual usage flow -- moved to index.html,
+       between the upload panel and the history list. #}
     {# plan/05-h: papers are English but the UI defaulted to Japanese-only
        -- a toggle link switches locale via ?lang= and persists it in a
        cookie so it sticks across navigation. #}
