@@ -305,6 +305,26 @@ def test_preread_search_link_includes_paper_title_as_context(isolated_data_dir, 
     assert "1+Introduction" in html or "1%20Introduction" in html
 
 
+def test_offline_ready_indicator_markup_present_and_hidden_by_default(isolated_data_dir, tmp_path, monkeypatch):
+    # plan/07-troubleshooting-backlog.md#b-6: server only ever renders this
+    # hidden; reader.js unhides it once caching actually succeeds.
+    monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: load_golden_tei())
+    pdf_path = blank_pdf(tmp_path, pages=2)
+    paper_id = pipeline.process_upload("sample.pdf", open(pdf_path, "rb").read())
+
+    html = TestClient(app).get(f"/papers/{paper_id}").text
+    assert '<p id="offline-ready-indicator" class="offline-ready-indicator" hidden>' in html
+
+
+def test_service_worker_served_from_root_scope(isolated_data_dir):
+    # Must be served from /sw.js (not /static/sw.js) so its default scope
+    # covers /papers/* -- see app/main.py's service_worker() docstring.
+    response = TestClient(app).get("/sw.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/javascript")
+    assert "current-offline-paper" in response.text
+
+
 def test_marking_known_from_preread_section_uses_same_store_as_popover(isolated_data_dir, tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "extract_tei", lambda pdf_path: _UNDEFINED_FREQUENT_TERM_TEI)
     client = TestClient(app)

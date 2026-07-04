@@ -25,6 +25,10 @@
       {{ t('reading_meta', minutes=content.est_minutes, words=content.word_count) }}
     </p>
     <p class="reader-source">{{ t('source_prefix', source=paper.source) }}</p>
+    {# plan/07-troubleshooting-backlog.md#b-6: only ever unhidden by JS,
+       mobile-only, once this paper's page/figures/assets are actually
+       confirmed cached -- never shown just because the page loaded. #}
+    <p id="offline-ready-indicator" class="offline-ready-indicator" hidden>{{ t('offline_ready_indicator') }}</p>
     {% if content.glossary %}
     <p class="glossary-hint">{{ t('glossary_hint') }}</p>
     {% endif %}

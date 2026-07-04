@@ -577,6 +577,13 @@ main {
   margin: 0.2rem 0;
 }
 
+.offline-ready-indicator {
+  color: var(--accent, #2a7a4f);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0.3rem 0;
+}
+
 .reader-abstract {
   margin: 1rem 0 0;
   padding: 0.9rem 1rem;

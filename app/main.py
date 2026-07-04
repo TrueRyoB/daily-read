@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -35,6 +35,16 @@ logger.info("daily-read starting at commit %s", version.VERSION_LABEL)
 app = FastAPI(title="daily-read")
 templates = Jinja2Templates(directory=str(_APP_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(_APP_DIR / "static")), name="static")
+
+
+@app.get("/sw.js")
+def service_worker() -> PlainTextResponse:
+    """Served at the root path (not /static/sw.js) deliberately: a Service
+    Worker's default scope is the directory it's served from and below, so
+    this is what lets it intercept /papers/* requests, not just /static/*
+    ones (plan/07-troubleshooting-backlog.md#b-6)."""
+    content = (_APP_DIR / "static" / "sw.js").read_text(encoding="utf-8")
+    return PlainTextResponse(content, media_type="application/javascript")
 
 
 def _locale_context(request: Request) -> tuple[str, dict]:

@@ -77,6 +77,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "interpretation_overflow": "他{count}件",
         "interpretation_day_modal_close": "閉じる",
         "interpretation_no_papers": "関連論文なし",
+        "offline_ready_indicator": "📶 オフラインで閲覧可能",
     },
     "en": {
         "tagline": "Make papers easier to read",
@@ -145,6 +146,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "interpretation_overflow": "{count} more",
         "interpretation_day_modal_close": "Close",
         "interpretation_no_papers": "No related papers",
+        "offline_ready_indicator": "📶 Available offline",
     },
 }
 

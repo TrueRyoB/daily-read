@@ -513,3 +513,42 @@ const I18N = JSON.parse(document.getElementById("i18n-data")?.textContent || "{}
     }
   });
 })();
+
+// Offline resilience on mobile (plan/07-troubleshooting-backlog.md#b-6):
+// once this paper's page/figures/assets are cached, the reader can keep
+// going through a network dropout (e.g. a subway tunnel) instead of
+// losing the page. Deliberately keeps only the most recently opened
+// paper -- caches.delete() evicts whatever was cached before every time.
+// Desktop is unaffected: this whole IIFE no-ops there.
+(function () {
+  const CACHE_NAME = "current-offline-paper";
+  const isMobileLayout = () => window.matchMedia("(max-width: 860px)").matches;
+  if (!isMobileLayout() || !("serviceWorker" in navigator) || !("caches" in window)) return;
+
+  const indicator = document.getElementById("offline-ready-indicator");
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+  const figuresDataEl = document.getElementById("figures-data");
+  const figures = figuresDataEl ? JSON.parse(figuresDataEl.textContent || "[]") : [];
+  const urlsToCache = [
+    window.location.pathname,
+    "/static/reader.js",
+    "/static/styles.css",
+    "/static/fonts/AtkinsonHyperlegible-Regular.woff2",
+    "/static/fonts/AtkinsonHyperlegible-Bold.woff2",
+    "/static/fonts/AtkinsonHyperlegible-Italic.woff2",
+  ].concat(figures.map((f) => f.image_url));
+
+  caches
+    .delete(CACHE_NAME)
+    .then(() => caches.open(CACHE_NAME))
+    .then((cache) => cache.addAll(urlsToCache))
+    .then(() => {
+      if (indicator) indicator.hidden = false;
+    })
+    .catch(() => {
+      // A network hiccup mid-cache (or an offline first load) shouldn't
+      // show a false "available offline" claim -- indicator just stays
+      // hidden.
+    });
+})();
