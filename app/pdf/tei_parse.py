@@ -74,24 +74,43 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
                     if grobid_id:
                         grobid_id_to_figure_id[grobid_id] = figure.figure_id
 
-    def _flush_stray_fragments(buffer: list[str]) -> None:
-        # plan/07-troubleshooting-backlog.md#b-11: rather than silently
-        # dropping a detected diagram-label run, surface it as its own
-        # unit -- readers can bear the interpretive cost of a raw, un-
-        # prosified fragment list, but not a spurious heading breaking the
-        # section structure. Kept out of the heading/paragraph flow
-        # entirely (its own `kind`) so it never pollutes the table of
-        # contents or reads as if the paper's own author wrote it.
+    # --- "fragment run" framework (plan/07-troubleshooting-backlog.md#b-11) ---
+    # GROBID occasionally fails to segment some region (so far: a diagram
+    # it couldn't recognize as one <figure> block) and instead leaks its
+    # pieces into the body as ordinary-looking elements. Rather than one
+    # special case per failure mode, this is a small, extensible pipeline:
+    # a "fragment run" is a streak of consecutive body items flagged noisy
+    # by ANY registered predicate below, accumulated into one buffer and
+    # flushed as a single `figure_fallback` unit (never as a heading/
+    # paragraph, so it can never pollute the TOC or read as the paper's
+    # own prose) once a genuinely normal item ends the streak.
+    #
+    # Two predicates exist today, for the two symptoms of the same real
+    # failure (a diagram GROBID never recognized as a <figure>):
+    #   - _is_stray_head_fragment: the diagram's individual text-box
+    #     labels, mis-tagged as bare, unnumbered <head> elements.
+    #   - _is_fragment_run_continuation: the diagram's own caption text,
+    #     which GROBID emits as an ordinary <p> once it runs out of
+    #     head-shaped fragments -- only ever consulted while a run is
+    #     already active, so a normal "Figure 3: ..." caption elsewhere
+    #     in the document is never touched.
+    # A future failure mode (e.g. a formula GROBID mangles into
+    # unreadable fragments) should be handled by adding one more
+    # predicate and wiring it into the relevant tag branch below -- NOT
+    # by bolting on another one-off special case elsewhere, so a fix
+    # applied for one kind of fragment can't quietly fail to cover
+    # another.
+    def _flush_fragment_run(buffer: list[str]) -> None:
         if buffer:
             units.append(ContentUnit(kind="figure_fallback", text="\n".join(buffer)))
             buffer.clear()
 
-    in_stray_diagram_run = False
-    stray_fragment_buffer: list[str] = []
+    in_fragment_run = False
+    fragment_buffer: list[str] = []
     for idx, (depth, item, has_paragraph_sibling) in enumerate(clustered):
         if isinstance(item, list):
-            _flush_stray_fragments(stray_fragment_buffer)
-            in_stray_diagram_run = False
+            _flush_fragment_run(fragment_buffer)
+            in_fragment_run = False
             figure = built_figures[idx]
             if figure is not None:
                 units.append(ContentUnit(kind="figure_ref", figure_id=figure.figure_id))
@@ -107,30 +126,31 @@ def parse_tei(tei_xml: str, pdf_path: str) -> NormalizedDocument:
             # with the diagram's own real caption paragraph (observed on
             # the real "Model"/"Fig 2: DAD..." pair) -- that paragraph
             # sibling would otherwise let it slip past the base
-            # _is_stray_diagram_label check. Once a run of stray labels
-            # has started, any further unnumbered head is treated as part
-            # of the same run regardless of its own paragraph sibling;
-            # the paragraph itself is unaffected, it's a separate stream
-            # item processed on its own next.
-            if _is_stray_diagram_label(item, has_paragraph_sibling) or (in_stray_diagram_run and not item.get("n")):
-                in_stray_diagram_run = True
+            # _is_stray_head_fragment check. Once a run has started, any
+            # further unnumbered head is treated as part of the same run
+            # regardless of its own paragraph sibling.
+            if _is_stray_head_fragment(item, has_paragraph_sibling) or (in_fragment_run and not item.get("n")):
+                in_fragment_run = True
                 text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
                 if text:
-                    stray_fragment_buffer.append(text)
+                    fragment_buffer.append(text)
                 continue
-            _flush_stray_fragments(stray_fragment_buffer)
-            in_stray_diagram_run = False
+            _flush_fragment_run(fragment_buffer)
+            in_fragment_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
             if text:
                 units.append(ContentUnit(kind="heading", text=text, level=_infer_level(text, depth)))
         elif tag == "p":
-            _flush_stray_fragments(stray_fragment_buffer)
-            in_stray_diagram_run = False
             text = _merge_adjacent_citations(_clean_text(item, grobid_id_to_figure_id))
+            if in_fragment_run and text and _is_fragment_run_continuation(text):
+                fragment_buffer.append(text)
+                continue
+            _flush_fragment_run(fragment_buffer)
+            in_fragment_run = False
             if text:
                 units.append(ContentUnit(kind="paragraph", text=text))
 
-    _flush_stray_fragments(stray_fragment_buffer)
+    _flush_fragment_run(fragment_buffer)
 
     return NormalizedDocument(
         units=units,
@@ -297,7 +317,12 @@ def _clean_text(elem: ET.Element, fig_id_map: dict[str, str] | None = None) -> s
     <ref type="bibr"> citation markers are replaced with a placeholder
     token (see app.models.citation_placeholder) instead of being flattened
     to plain text, so rendering.py can turn them into links later without
-    ContentUnit.text stopping being a plain string (plan/03-c).
+    ContentUnit.text stopping being a plain string (plan/03-c). A narrative
+    author-year lead-in immediately before the marker ("Foster et al.
+    (2020) [44]") is stripped down to just the numbered marker ("[44]")
+    -- plan/07-troubleshooting-backlog.md: names/dates the reader didn't
+    ask for are pure noise once a numbered reference already exists right
+    next to them.
 
     <ref type="figure"/"table"> inline mentions ("as shown in Figure 3")
     get the same placeholder treatment when `fig_id_map` (GROBID xml:id ->
@@ -319,6 +344,8 @@ def _clean_text(elem: ET.Element, fig_id_map: dict[str, str] | None = None) -> s
         if localname == "lb":
             parts.append(" ")
         elif bib_id is not None:
+            if parts:
+                parts[-1] = _AUTHOR_YEAR_LEADIN_RE.sub("", parts[-1])
             parts.append(citation_placeholder(bib_id, _clean_text(child) or f"[{bib_id}]"))
         elif figure_id is not None:
             parts.append(figure_mention_placeholder(figure_id, _clean_text(child) or figure_id))
@@ -327,6 +354,18 @@ def _clean_text(elem: ET.Element, fig_id_map: dict[str, str] | None = None) -> s
         if child.tail:
             parts.append(child.tail)
     return " ".join("".join(parts).split())
+
+
+# Matches a narrative author-year lead-in immediately preceding a numbered
+# citation marker -- "Foster et al. (2020)", "Huan and Marzouk (2016)",
+# "Smith, Jones and Lee (2021)", "Smith (2020)" -- anchored to the END of
+# the preceding text chunk ($) so only the mention directly adjacent to
+# the upcoming citation marker is ever touched, never an unrelated name
+# earlier in the same sentence.
+_AUTHOR_YEAR_LEADIN_RE = re.compile(
+    r"[A-Z][A-Za-z'\-]+(?:,\s*[A-Z][A-Za-z'\-]+)*(?:,?\s*(?:and|&)\s*[A-Z][A-Za-z'\-]+)?"
+    r"(?:\s+et\s+al\.?)?\s*\(\d{4}[a-z]?\)\s*$"
+)
 
 
 def _bib_target_id(ref_elem: ET.Element) -> str | None:
@@ -402,7 +441,7 @@ def _merge_adjacent_citations(text: str) -> str:
     return "".join(pieces)
 
 
-def _is_stray_diagram_label(head: ET.Element, div_has_paragraph: bool) -> bool:
+def _is_stray_head_fragment(head: ET.Element, div_has_paragraph: bool) -> bool:
     """Detects a <head> that is almost certainly a mis-segmented text
     fragment from a figure (a flowchart/diagram made of short text boxes
     and arrows -- Mermaid-style diagrams are a common source, since their
@@ -426,6 +465,29 @@ def _is_stray_diagram_label(head: ET.Element, div_has_paragraph: bool) -> bool:
     Requiring both keeps every real heading, numbered or not.
     """
     return not head.get("n") and not div_has_paragraph
+
+
+_FRAGMENT_RUN_CONTINUATION_RE = re.compile(r"^(?:fig(?:ure)?|table)s?\.?\s*\d+\s*[:.]", re.IGNORECASE)
+
+
+def _is_fragment_run_continuation(text: str) -> bool:
+    """A paragraph immediately following an *already active* fragment run
+    that itself opens like a figure/table caption ("Fig 2 :", "Table 3.")
+    is almost certainly the same failed figure's own caption text --
+    GROBID emits it as an ordinary <p> once it runs out of head-shaped
+    fragments to mis-tag (plan/07-troubleshooting-backlog.md#b-11,
+    observed on a real paper: "Fig 2 : DAD: a design policy network..."
+    immediately follows the four misdetected heading fragments in the
+    same <div> as the last one).
+
+    Deliberately only ever consulted while `in_fragment_run` is already
+    True (see the main loop in parse_tei) -- a "Figure 3: ..." caption
+    appearing anywhere else in the document is ordinary, correctly-placed
+    prose (or a real figure's own fallback caption via
+    _figure_caption_text) and must never be swept away just because it
+    starts with that phrase.
+    """
+    return bool(_FRAGMENT_RUN_CONTINUATION_RE.match(text.strip()))
 
 
 def _infer_level(text: str, nesting_depth: int) -> int:

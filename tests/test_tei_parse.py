@@ -55,6 +55,16 @@ def test_line_break_does_not_glue_words_together(tmp_path):
     assert normalized.units[0].text == "wordone wordtwo"
 
 
+_STRAY_DIAGRAM_LABEL_BODY = """
+<div><head n="4.1">Deep Adaptive Design</head><p>intro text</p></div>
+<div><head>Offline training</head></div>
+<div><head>Deploy</head></div>
+<div><head>Live experiment</head></div>
+<div><head>Model</head><p>Fig 2 : DAD pipeline diagram.</p><p>Continuing prose about the pipeline.</p></div>
+<div><head n="4.2">Learning Policies</head><p>next section</p></div>
+"""
+
+
 def test_stray_diagram_label_heads_are_not_treated_as_headings(tmp_path):
     # plan/07-troubleshooting-backlog.md: a real processed paper's Figure 2
     # pipeline diagram (flowchart-style, Mermaid-like box labels) surfaced
@@ -63,22 +73,14 @@ def test_stray_diagram_label_heads_are_not_treated_as_headings(tmp_path):
     # recognize the diagram as one figure block and instead segmented its
     # box labels as their own <div><head>...</head></div> elements with no
     # body text at all.
-    tei = _wrap_body(
-        """
-        <div><head n="4.1">Deep Adaptive Design</head><p>intro text</p></div>
-        <div><head>Offline training</head></div>
-        <div><head>Deploy</head></div>
-        <div><head>Live experiment</head></div>
-        <div><head>Model</head><p>Fig 2: DAD pipeline diagram.</p></div>
-        <div><head n="4.2">Learning Policies</head><p>next section</p></div>
-        """
-    )
-    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    normalized = parse_tei(_wrap_body(_STRAY_DIAGRAM_LABEL_BODY), _blank_pdf(tmp_path))
     headings = [u.text for u in normalized.units if u.kind == "heading"]
     assert headings == ["Deep Adaptive Design", "Learning Policies"]
-    # the paragraph sharing a div with a stray head is unaffected
+    # ordinary prose that just happens to share a div with the run's last
+    # head is unaffected -- only the caption-shaped paragraph right after
+    # the run gets absorbed (see the next test).
     paragraphs = [u.text for u in normalized.units if u.kind == "paragraph"]
-    assert "Fig 2: DAD pipeline diagram." in paragraphs
+    assert "Continuing prose about the pipeline." in paragraphs
     assert "intro text" in paragraphs
 
 
@@ -86,32 +88,52 @@ def test_stray_diagram_label_run_is_surfaced_as_a_figure_fallback_unit(tmp_path)
     # plan/07-troubleshooting-backlog.md#b-11: rather than silently
     # dropping the detected run, it's surfaced as its own unit (raw,
     # un-prosified fragments) instead of either vanishing entirely or
-    # masquerading as headings that break the section structure.
-    tei = _wrap_body(
-        """
-        <div><head n="4.1">Deep Adaptive Design</head><p>intro text</p></div>
-        <div><head>Offline training</head></div>
-        <div><head>Deploy</head></div>
-        <div><head>Live experiment</head></div>
-        <div><head>Model</head><p>Fig 2: DAD pipeline diagram.</p></div>
-        <div><head n="4.2">Learning Policies</head><p>next section</p></div>
-        """
-    )
-    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    # masquerading as headings that break the section structure. The
+    # figure's own caption paragraph ("Fig 2 : ...", emitted as an
+    # ordinary <p> once GROBID ran out of head-shaped fragments) is
+    # absorbed into the same run -- a real-world gap found after the
+    # initial fix shipped: the run's last head can share a <div> with its
+    # own caption paragraph, which used to be left behind in the body as
+    # if it were independent prose.
+    normalized = parse_tei(_wrap_body(_STRAY_DIAGRAM_LABEL_BODY), _blank_pdf(tmp_path))
     fallback_units = [u for u in normalized.units if u.kind == "figure_fallback"]
     assert len(fallback_units) == 1
-    assert fallback_units[0].text == "Offline training\nDeploy\nLive experiment\nModel"
+    assert fallback_units[0].text == "Offline training\nDeploy\nLive experiment\nModel\nFig 2 : DAD pipeline diagram."
+
+    # the paragraph that does NOT look like a caption opening is left as
+    # ordinary prose, not swept in just because it shares a div with the
+    # absorbed caption.
+    paragraphs = [u.text for u in normalized.units if u.kind == "paragraph"]
+    assert "Continuing prose about the pipeline." in paragraphs
 
     # it sits in reading order right where the stray run occurred -- after
-    # "intro text", before "Fig 2: DAD pipeline diagram."
+    # "intro text", before "next section".
     kinds_in_order = [(u.kind, u.text) for u in normalized.units]
     intro_idx = kinds_in_order.index(("paragraph", "intro text"))
-    fig2_idx = kinds_in_order.index(("paragraph", "Fig 2: DAD pipeline diagram."))
+    next_section_idx = kinds_in_order.index(("paragraph", "next section"))
     fallback_idx = next(i for i, (k, _) in enumerate(kinds_in_order) if k == "figure_fallback")
-    assert intro_idx < fallback_idx < fig2_idx
+    assert intro_idx < fallback_idx < next_section_idx
 
     # never pollutes the table of contents
     assert all(u.kind != "heading" for u in fallback_units)
+
+
+def test_figure_caption_elsewhere_is_not_absorbed_without_an_active_run(tmp_path):
+    # A "Figure 3: ..." caption that appears with no preceding stray-head
+    # run at all is ordinary, correctly-placed prose (or a real figure's
+    # own caption paragraph) and must never be swept into a fallback unit
+    # just because of how it opens.
+    tei = _wrap_body(
+        """
+        <div><head n="1">Results</head>
+          <p>Fig 3 : An unrelated, perfectly normal figure caption.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert not any(u.kind == "figure_fallback" for u in normalized.units)
+    paragraphs = [u.text for u in normalized.units if u.kind == "paragraph"]
+    assert "Fig 3 : An unrelated, perfectly normal figure caption." in paragraphs
 
 
 def test_figure_fallback_flushed_at_end_of_document(tmp_path):
@@ -495,3 +517,72 @@ def test_non_adjacent_citation_refs_are_not_merged(tmp_path):
     assert text.count("\x00CITE:") == 2
     assert "\x00CITE:b0\x00[1]\x00/CITE\x00" in text
     assert "\x00CITE:b1\x00[2]\x00/CITE\x00" in text
+
+
+def test_et_al_author_year_leadin_is_replaced_by_the_citation_marker(tmp_path):
+    # plan/07-troubleshooting-backlog.md: names/dates the reader didn't ask
+    # for are noise once a numbered reference already exists right next
+    # to them (real example: "Foster et al. (2020) [44] introduced...").
+    tei = _wrap_body(
+        """
+        <div>
+          <p>Foster et al. (2020) <ref type="bibr" target="#b43">[44]</ref> introduced this.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    text = normalized.units[0].text
+    assert "Foster" not in text
+    assert text.startswith("\x00CITE:b43\x00[44]\x00/CITE\x00 introduced this.")
+
+
+def test_two_author_and_leadin_is_replaced_by_the_citation_marker(tmp_path):
+    tei = _wrap_body(
+        """
+        <div>
+          <p>Huan and Marzouk (2016) <ref type="bibr" target="#b69">[70]</ref> proposed this.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    text = normalized.units[0].text
+    assert "Huan" not in text
+    assert "Marzouk" not in text
+    assert text.startswith("\x00CITE:b69\x00[70]\x00/CITE\x00 proposed this.")
+
+
+def test_single_author_leadin_is_replaced_by_the_citation_marker(tmp_path):
+    tei = _wrap_body(
+        """
+        <div>
+          <p>As shown by Smith (2019) <ref type="bibr" target="#b5">[6]</ref>, the result holds.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    text = normalized.units[0].text
+    assert "Smith" not in text
+    assert "As shown by \x00CITE:b5\x00[6]\x00/CITE\x00, the result holds." == text
+
+
+def test_author_year_leadin_stripping_does_not_touch_unrelated_earlier_text(tmp_path):
+    # Only the mention immediately adjacent to the upcoming citation
+    # marker is touched -- an author's name mentioned earlier in the same
+    # sentence with no citation marker right after it is left alone.
+    tei = _wrap_body(
+        """
+        <div>
+          <p>Foster is a researcher. Separately, Smith (2019) <ref type="bibr" target="#b5">[6]</ref> showed this.</p>
+        </div>
+        """
+    )
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    text = normalized.units[0].text
+    assert "Foster is a researcher." in text
+    assert "Smith" not in text
+
+
+def test_author_name_with_no_following_citation_marker_is_untouched(tmp_path):
+    tei = _wrap_body("<div><p>Adam Foster is a Senior Researcher at Microsoft.</p></div>")
+    normalized = parse_tei(tei, _blank_pdf(tmp_path))
+    assert normalized.units[0].text == "Adam Foster is a Senior Researcher at Microsoft."
